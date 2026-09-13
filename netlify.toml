@@ -1,0 +1,22 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # Keep scheduled crawl under Netlify function limits (Pro ≈26s)
+  CRAWL_BUDGET_MS = "20000"
+  SPORTY_FETCH_MS = "8000"
+  OPENAI_TIMEOUT_MS = "7000"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[functions."crawl-sure"]
+  schedule = "*/20 * * * *"
+  # Requires Netlify Pro for >10s. Free tier max is 10 — set CRAWL_BUDGET_MS=8000 there.
+  timeout = 26
