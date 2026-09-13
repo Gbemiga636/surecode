@@ -9,6 +9,7 @@ import {
   type SbEvent,
 } from "./sporty";
 import { chatJson, chatPlain } from "./openai";
+import { fixturePageBudget } from "./budget";
 
 export type SureSlip = {
   slot: number;
@@ -281,7 +282,7 @@ export async function buildSureSlipsOfDay(
   opts: { allowAi?: boolean } = {},
 ): Promise<SureSlip[]> {
   const now = Date.now();
-  const fixtures = (await getSportyFixtures(6)).filter(
+  const fixtures = (await getSportyFixtures(fixturePageBudget())).filter(
     (e) => e.kickoff > now + 30 * 60_000 && e.kickoff < now + 36 * 3600_000,
   );
 

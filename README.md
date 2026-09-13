@@ -75,6 +75,46 @@ curl -X POST http://localhost:3000/api/crawl -H "Authorization: Bearer YOUR_CRAW
 
 ---
 
+## 4b. Vercel free (Hobby) — recommended
+
+Next.js runs natively on Vercel. Free plan works well with these settings already in the repo.
+
+### Deploy
+1. [vercel.com/new](https://vercel.com/new) → Import `Gbemiga636/surecode`
+2. Framework: **Next.js** (auto)
+3. Root directory: `.` (repo root)
+4. Paste env vars (see below)
+5. Deploy
+
+### Env vars (Vercel → Settings → Environment Variables)
+Same as `.env.example`. Set:
+- `NEXT_PUBLIC_SITE_URL` = `https://YOUR-PROJECT.vercel.app`
+- `CRON_SECRET` = same value as `CRAWL_SECRET` (or any long random string)
+- `CRAWL_BUDGET_MS=45000`
+
+### Auth
+Supabase → Authentication → URL configuration:
+- Site URL = your Vercel URL
+- Redirect: `https://YOUR-PROJECT.vercel.app/auth/callback`
+
+### Crawls on free plan
+- **Built-in Vercel Cron** (in `vercel.json`): twice daily (07:00 + 19:00 UTC) — Hobby allows **once/day per cron**.
+- **Every ~20 minutes (recommended):** free [cron-job.org](https://cron-job.org) →
+  - URL: `https://YOUR-PROJECT.vercel.app/api/crawl`
+  - Method: `GET`
+  - Header: `Authorization: Bearer YOUR_CRAWL_SECRET`
+  - Schedule: every 20 minutes
+
+### After first deploy
+```bash
+curl "https://YOUR-PROJECT.vercel.app/api/crawl" \
+  -H "Authorization: Bearer YOUR_CRAWL_SECRET"
+```
+
+Reliability already baked in: cached pick pools, soft crawl deadline, API try/catch, app error boundary, safe middleware if env missing.
+
+---
+
 ## 4. Netlify (separate site) — go-live checklist
 
 1. Create a **new** Netlify site (not the parent Sporty site).
