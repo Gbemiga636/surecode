@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { runSureCrawl } from "@/lib/crawl";
 
-/** Hobby Fluid Compute allows up to 300s; 60s is enough for a full sure crawl. */
-export const maxDuration = 60;
+/** Allow background crawl to finish after cron gets a fast 200. */
+export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -13,16 +13,45 @@ function isAuthorized(request: Request): boolean {
   const auth = request.headers.get("authorization") || "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
 
-  // Manual / external cron (cron-job.org, curl, etc.)
   if (crawlSecret && (hdr === crawlSecret || bearer === crawlSecret)) return true;
-  // Vercel Cron auto-sends Authorization: Bearer <CRON_SECRET>
   if (cronSecret && bearer === cronSecret) return true;
   return false;
 }
 
+/**
+ * Default (cron-friendly): return 200 immediately, run crawl in background via after().
+ * Add ?wait=1 to wait for the full result (manual debugging only).
+ */
 async function handle(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const wait = url.searchParams.get("wait") === "1";
+
+  if (!wait) {
+    after(async () => {
+      try {
+        const result = await runSureCrawl();
+        console.log("[api/crawl] background done:", result.summary);
+      } catch (e) {
+        console.error("[api/crawl] background failed:", e instanceof Error ? e.message : e);
+      }
+    });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        started: true,
+        mode: "async",
+        message: "Crawl started in background. Check /home in ~30–60s.",
+      },
+      {
+        status: 202,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
   }
 
   try {
@@ -34,7 +63,6 @@ async function handle(request: Request) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("[api/crawl]", message);
-    // Never throw raw 500 stack to the edge — keep response JSON so cron doesn't "crash"
     return NextResponse.json(
       { ok: false, error: message, summary: message },
       { status: 500, headers: { "Cache-Control": "no-store" } },
