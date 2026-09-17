@@ -1,7 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { runSureCrawl } from "@/lib/crawl";
 
-/** Allow background crawl to finish after cron gets a fast 200. */
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,8 +18,9 @@ function isAuthorized(request: Request): boolean {
 }
 
 /**
- * Default (cron-friendly): return 200 immediately, run crawl in background via after().
- * Add ?wait=1 to wait for the full result (manual debugging only).
+ * Vercel: async ACK via after() so external cron does not timeout.
+ * Netlify / other: run sync (after() often does not keep the worker alive).
+ * ?wait=1 always sync.
  */
 async function handle(request: Request) {
   if (!isAuthorized(request)) {
@@ -29,8 +29,9 @@ async function handle(request: Request) {
 
   const url = new URL(request.url);
   const wait = url.searchParams.get("wait") === "1";
+  const onVercel = process.env.VERCEL === "1";
 
-  if (!wait) {
+  if (!wait && onVercel) {
     after(async () => {
       try {
         const result = await runSureCrawl();
@@ -45,12 +46,9 @@ async function handle(request: Request) {
         ok: true,
         started: true,
         mode: "async",
-        message: "Crawl started in background. Check /home in ~30–60s.",
+        message: "Crawl started. Codes refresh on /home in ~30–90s.",
       },
-      {
-        status: 202,
-        headers: { "Cache-Control": "no-store" },
-      },
+      { status: 202, headers: { "Cache-Control": "no-store" } },
     );
   }
 

@@ -22,7 +22,7 @@ const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
     title: "Sure codes of the day",
-    subtitle: "High-confidence SportyBet booking codes — open, copy, or demo-stake",
+    subtitle: "2–3 quality games · stronger odds — open, copy, or demo-stake",
   },
   "/codes": {
     title: "Plenty of codes",

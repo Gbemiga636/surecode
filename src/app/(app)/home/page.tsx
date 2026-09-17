@@ -55,7 +55,7 @@ export default async function HomePage() {
       <PageHeader
         kicker="Today"
         title="Sure codes"
-        subtitle={`${day} · High-confidence slips booked on SportyBet. Open the code — you place the stake.`}
+        subtitle={`${day} · Fewer games, stronger prices (2–3 folds). Open the code — you place the stake.`}
       />
 
       {latest && (
@@ -74,13 +74,13 @@ export default async function HomePage() {
           <GoalPosts />
           <div className="relative z-[2] p-6 pr-[160px] max-[860px]:pr-6 sm:p-8 sm:pr-[160px]">
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
-              Latest sure code · slip {latest.slot}
+              Latest sure code · slip {latest.slot} · quality fold
             </p>
             <p className="mt-3 font-mono text-3xl font-extrabold tracking-[0.12em] text-[var(--ink)] sm:text-4xl">
               {latest.code}
             </p>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              Combined odds{" "}
+              {(latest.legs ?? []).length} games · odds{" "}
               <span className="font-semibold text-[var(--ink)]">
                 {latest.total_odds != null ? Number(latest.total_odds).toFixed(2) : "—"}
               </span>
