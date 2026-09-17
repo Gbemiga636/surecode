@@ -11,6 +11,38 @@ const EVENTS_API =
 const SHARE_API = "https://www.sportybet.com/api/ng/orders/share";
 const EVENT_API = "https://www.sportybet.com/api/ng/factsCenter/event?eventId=";
 
+/** Reverse lookup: SportyBet market/outcome → our pick code */
+export function pickCodeForBooking(
+  marketId: string,
+  specifier: string,
+  outcomeId: string,
+): string | null {
+  const mid = String(marketId);
+  const spec = specifier ?? "";
+  const oid = String(outcomeId);
+  for (const [code, meta] of Object.entries(PICKS)) {
+    if (meta.marketId !== mid) continue;
+    if ((meta.specifier || "") !== spec) continue;
+    if (meta.outcomeId !== oid) continue;
+    return code;
+  }
+  return null;
+}
+
+export type ShareSelection = {
+  eventId: string;
+  marketId: string;
+  specifier: string;
+  outcomeId: string;
+  home: string;
+  away: string;
+  league?: string;
+  kickoff: number;
+  odds: number;
+  pickCode: string | null;
+  pickLabel: string;
+};
+
 export const PICKS: Record<
   string,
   { marketId: string; specifier: string; outcomeId: string; label: string; market: string }
@@ -310,6 +342,114 @@ export async function createBookingCode(
 
 export function sportyOpenUrl(code: string): string {
   return `https://www.sportybet.com/ng/?shareCode=${encodeURIComponent(code)}`;
+}
+
+function normalizeShareCode(raw: string): string {
+  const trimmed = raw.trim();
+  const fromUrl = trimmed.match(/shareCode=([A-Za-z0-9]+)/i);
+  if (fromUrl) return fromUrl[1].toUpperCase();
+  const bare = trimmed.replace(/[^A-Za-z0-9]/g, "");
+  return bare.toUpperCase();
+}
+
+function parseShareOutcomes(outcomes: unknown[]): ShareSelection[] {
+  const out: ShareSelection[] = [];
+  for (const raw of outcomes) {
+    const o = raw as Record<string, unknown>;
+    const eventId = String(o.eventId ?? o.event_id ?? "");
+    const marketId = String(o.marketId ?? o.market_id ?? "");
+    const outcomeId = String(o.outcomeId ?? o.outcome_id ?? "");
+    const specifier = String(o.specifier ?? "");
+    if (!eventId || !marketId || !outcomeId) continue;
+    const home = String(
+      o.homeTeamName ?? o.home ?? o.homeTeam ?? o.home_team_name ?? "Home",
+    );
+    const away = String(
+      o.awayTeamName ?? o.away ?? o.awayTeam ?? o.away_team_name ?? "Away",
+    );
+    const odds = Number(o.odds ?? o.outcomeOdds ?? 0) || 0;
+    const kickoff =
+      Number(o.estimateStartTime ?? o.startTime ?? o.kickoff ?? 0) || 0;
+    const pickCode = pickCodeForBooking(marketId, specifier, outcomeId);
+    const pickLabel = pickCode
+      ? pickLabelFn(pickCode, home, away)
+      : String(o.outcomeDesc ?? o.marketDesc ?? `${marketId}/${outcomeId}`);
+    out.push({
+      eventId,
+      marketId,
+      specifier,
+      outcomeId,
+      home,
+      away,
+      league: o.tournamentName ? String(o.tournamentName) : undefined,
+      kickoff,
+      odds,
+      pickCode,
+      pickLabel,
+    });
+  }
+  return out;
+}
+
+// avoid name clash with exported pickLabel
+function pickLabelFn(code: string, home: string, away: string): string {
+  return pickLabel(code, home, away);
+}
+
+/**
+ * Load selections for an existing SportyBet share/booking code.
+ * Tries several public endpoints SportyBet exposes for share slips.
+ */
+export async function fetchShareCode(
+  rawCode: string,
+): Promise<{ code: string; selections: ShareSelection[]; error?: string; totalOdds?: number }> {
+  const code = normalizeShareCode(rawCode);
+  if (!code || code.length < 4) {
+    return { code: "", selections: [], error: "Enter a valid SportyBet share code" };
+  }
+
+  const urls = [
+    `${SHARE_API}/${encodeURIComponent(code)}`,
+    `${SHARE_API}?shareCode=${encodeURIComponent(code)}`,
+    `https://www.sportybet.com/api/ng/orders/share/winnings?shareCode=${encodeURIComponent(code)}`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const json = (await fetchJson(url)) as {
+        bizCode?: number;
+        data?: {
+          shareCode?: string;
+          outcomes?: unknown[];
+          selections?: unknown[];
+          totalOdds?: number | string;
+        };
+      };
+      const outcomes = json?.data?.outcomes ?? json?.data?.selections;
+      if (json?.bizCode === 10000 && Array.isArray(outcomes) && outcomes.length) {
+        const selections = parseShareOutcomes(outcomes);
+        if (selections.length) {
+          const totalOdds =
+            Number(json.data?.totalOdds) ||
+            selections.reduce((a, s) => a * (s.odds > 1 ? s.odds : 1), 1);
+          return {
+            code: json.data?.shareCode || code,
+            selections,
+            totalOdds,
+          };
+        }
+      }
+    } catch {
+      /* try next */
+    }
+  }
+
+  return {
+    code,
+    selections: [],
+    error:
+      "Could not load that code from SportyBet. Check it is still valid, or paste a code created in SureCode.",
+  };
 }
 
 /** Best-effort final score from SportyBet event API (ended matches only). */

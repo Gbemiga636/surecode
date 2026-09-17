@@ -56,6 +56,7 @@ export async function updateSession(request: NextRequest) {
       "/combos",
       "/saved",
       "/leaderboard",
+      "/edit",
     ];
     if (protectedRoots.some((p) => path === p || path.startsWith(p + "/"))) {
       const url = request.nextUrl.clone();

@@ -7,6 +7,7 @@ import { Icon, type IconName } from "./Icons";
 
 const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
   { href: "/home", label: "Sure codes", icon: "shield" },
+  { href: "/edit", label: "Edit long codes", icon: "layers" },
   { href: "/codes", label: "Plenty codes", icon: "dashboard" },
   { href: "/predictions", label: "Predictions", icon: "calendar" },
   { href: "/expert", label: "Expert picks", icon: "target" },
@@ -23,6 +24,10 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
     title: "Sure codes of the day",
     subtitle: "2–3 quality games · stronger odds — open, copy, or demo-stake",
+  },
+  "/edit": {
+    title: "Edit long codes",
+    subtitle: "Paste a long SportyBet code → shorter high-probability rebuilds",
   },
   "/codes": {
     title: "Plenty of codes",
@@ -62,7 +67,7 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   },
   "/past": {
     title: "Past codes",
-    subtitle: "History and settle results",
+    subtitle: "Full forever archive — filter by date · win/loss track record",
   },
   "/how": {
     title: "How it works",

@@ -58,7 +58,7 @@ async function loadPastHistory(
     .select("day, outcome, total_odds, legs")
     .in("outcome", ["WON", "LOST"])
     .order("day", { ascending: false })
-    .limit(40);
+    .limit(80);
 
   return (data ?? []).map((row) => {
     const legs = (Array.isArray(row.legs) ? row.legs : []) as BookableLeg[];
