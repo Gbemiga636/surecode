@@ -85,8 +85,8 @@ export function buildLearningSnapshot(rows: LegHistoryRow[]): LearningSnapshot {
     .sort((a, b) => b.winRate - a.winRate || b.plays - a.plays);
 
   const advice: string[] = [];
-  const strong = byPick.filter((p) => p.plays >= 8 && p.winRate >= 0.62);
-  const weak = byPick.filter((p) => p.plays >= 8 && p.winRate < 0.48);
+  const strong = byPick.filter((p) => p.plays >= 8 && p.winRate >= 0.65);
+  const weak = byPick.filter((p) => p.plays >= 8 && p.winRate < 0.55);
   if (strong.length) {
     advice.push(
       `Historically strong markets: ${strong
@@ -131,17 +131,17 @@ export function scoreLeg(
     winPrior = winPrior * 0.45 + league.winRate * 0.55;
   }
 
-  // Prefer mid prices (value) over tiny 1.05 locks and crazy longshots
+  // Prefer SHORT-MID elite prices for hit rate (sure mode)
   const odds = leg.odds;
   let oddsFit = 0;
-  if (odds >= 1.35 && odds <= 1.95) oddsFit = 1;
-  else if (odds >= 1.25 && odds < 1.35) oddsFit = 0.7;
-  else if (odds > 1.95 && odds <= 2.35) oddsFit = 0.75;
-  else if (odds > 2.35 && odds <= 2.8) oddsFit = 0.45;
-  else oddsFit = 0.2;
+  if (odds >= 1.18 && odds <= 1.45) oddsFit = 1.15;
+  else if (odds > 1.45 && odds <= 1.65) oddsFit = 1.0;
+  else if (odds > 1.65 && odds <= 1.85) oddsFit = 0.7;
+  else if (odds > 1.85 && odds <= 2.2) oddsFit = 0.4;
+  else oddsFit = 0.15;
 
-  // Expected log growth proxy
-  return winPrior * 2.2 + oddsFit * 1.1 + Math.log(odds) * 0.35;
+  // Expected hit orientation (not bankroll growth)
+  return winPrior * 2.6 + oddsFit * 1.35 + leg.implied * 0.9;
 }
 
 export function formatLearningForAi(snap: LearningSnapshot): object {

@@ -1,3 +1,8 @@
+/**
+ * High-hit SureCode engine.
+ * Priority = win rate, not big odds. Singles + rare 2-folds only.
+ * Full market analysis before booking.
+ */
 import {
   createBookingCode,
   getSportyFixtures,
@@ -7,11 +12,10 @@ import {
   type BookableLeg,
   type SbEvent,
 } from "./sporty";
-import { chatJson, chatPlain } from "./openai";
+import { chatPlain } from "./openai";
 import { fixturePageBudget } from "./budget";
 import {
   buildLearningSnapshot,
-  formatLearningForAi,
   scoreLeg,
   type LearningSnapshot,
   type LegHistoryRow,
@@ -36,36 +40,112 @@ export type PastOutcomeSample = {
 };
 
 /**
- * Quality markets — not ultra-short 1.05 DC spam.
- * Fewer legs + mid prices = better combined odds.
+ * Elite high-hit markets only (no BTTS / O2.5 / longshot 1X2 in sure slips).
+ * These historically survive parlays better.
  */
 export const QUALITY_PICK_CODES = [
-  "1",
-  "2",
   "DC1X",
   "DCX2",
-  "DNBH",
-  "DNBA",
   "O15",
-  "O25",
-  "BTTSY",
   "HO05",
   "AO05",
+  "DNBH",
+  "DNBA",
 ] as const;
 
-/** Per-leg odds band: skip junk shorts and wild longshots */
-const MIN_LEG_ODDS = 1.32;
-const MAX_LEG_ODDS = 2.45;
-/** Target combined slip odds */
-const MIN_SLIP_ODDS = 3.8;
-const MAX_SLIP_ODDS = 14;
+/** Tight band — short enough to hit, not 1.05 junk. */
+const MIN_LEG_ODDS = 1.18;
+const MAX_LEG_ODDS = 1.72;
+/** 2-fold combined ceiling — keep risk low */
+const MAX_DOUBLE_ODDS = 2.85;
+/** Minimum model score to include a leg */
+const MIN_LEG_SCORE = 1.55;
+/** Clear favourite gap on 1X2 (implied) before allowing home/away DC */
+const MIN_FAV_EDGE = 0.08;
 
-function legFromEventPick(ev: SbEvent, pickCode: string): BookableLeg | null {
+type AnalyzedLeg = BookableLeg & {
+  score: number;
+  analysis: string[];
+  favSide: "home" | "away" | "coin";
+  marketImplied: number;
+};
+
+function deVig1x2(ev: SbEvent): { home: number; draw: number; away: number } | null {
+  const h = ev.outcomes["1"];
+  const d = ev.outcomes.X;
+  const a = ev.outcomes["2"];
+  if (!h || !d || !a) return null;
+  const ih = 1 / h;
+  const id = 1 / d;
+  const ia = 1 / a;
+  const s = ih + id + ia;
+  if (s <= 0) return null;
+  return { home: ih / s, draw: id / s, away: ia / s };
+}
+
+function analyzeEventPick(ev: SbEvent, pickCode: string, snap: LearningSnapshot): AnalyzedLeg | null {
   const meta = PICKS[pickCode];
   if (!meta) return null;
   const odds = ev.outcomes[pickCode];
   if (!odds || odds < MIN_LEG_ODDS || odds > MAX_LEG_ODDS) return null;
-  return {
+
+  const probs = deVig1x2(ev);
+  const analysis: string[] = [];
+  let favSide: "home" | "away" | "coin" = "coin";
+
+  if (probs) {
+    if (probs.home - probs.away >= MIN_FAV_EDGE) favSide = "home";
+    else if (probs.away - probs.home >= MIN_FAV_EDGE) favSide = "away";
+
+    analysis.push(
+      `1X2 de-vig H ${Math.round(probs.home * 100)}% / D ${Math.round(probs.draw * 100)}% / A ${Math.round(probs.away * 100)}%`,
+    );
+
+    // Market alignment rules — only take DC/DNB on the clear favourite side
+    if (pickCode === "DC1X" || pickCode === "DNBH" || pickCode === "HO05") {
+      if (favSide !== "home") {
+        analysis.push("Rejected: not a clear home favourite");
+        return null;
+      }
+      if (probs.home < 0.42) {
+        analysis.push("Rejected: home win prob too low for this market");
+        return null;
+      }
+    }
+    if (pickCode === "DCX2" || pickCode === "DNBA" || pickCode === "AO05") {
+      if (favSide !== "away") {
+        analysis.push("Rejected: not a clear away favourite");
+        return null;
+      }
+      if (probs.away < 0.42) {
+        analysis.push("Rejected: away win prob too low for this market");
+        return null;
+      }
+    }
+    // O15: avoid ultra-defensive coin-flip games with high draw + low totals signal
+    if (pickCode === "O15") {
+      const o15 = odds;
+      const o25 = ev.outcomes.O25;
+      if (probs.draw > 0.32 && (!o25 || o25 > 2.4)) {
+        analysis.push("Rejected: draw-heavy / low-goal profile for Over 1.5");
+        return null;
+      }
+      if (o15 > 1.55) {
+        analysis.push("Rejected: Over 1.5 price too long (market not confident)");
+        return null;
+      }
+      analysis.push("Totals: market supports goals");
+    }
+
+    if (favSide === "coin") {
+      analysis.push("Knife-edge match — skipped for sure slips");
+      return null;
+    }
+  } else {
+    analysis.push("No full 1X2 book — limited analysis");
+  }
+
+  const leg: BookableLeg = {
     eventId: ev.eventId,
     marketId: meta.marketId,
     specifier: meta.specifier,
@@ -79,278 +159,224 @@ function legFromEventPick(ev: SbEvent, pickCode: string): BookableLeg | null {
     odds,
     implied: impliedProb(odds),
   };
-}
 
-function buildRationaleFallback(
-  legs: BookableLeg[],
-  totalOdds: number,
-  conf: number,
-  advice: string[],
-): string {
-  const names = legs.map((l) => `${l.home} vs ${l.away} (${l.pickLabel} @ ${l.odds.toFixed(2)})`);
-  const tip = advice[0] ? ` ${advice[0]}` : "";
-  return (
-    `${legs.length}-fold quality slip (not tiny prices). Combined odds ~${totalOdds.toFixed(2)}, ` +
-    `model ~${Math.round(conf * 100)}%. Legs: ${names.join("; ")}.${tip} ` +
-    `Not a guarantee — stake only what you can afford.`
+  // History gate: if we have enough samples and market underperforms, skip
+  const pickStat = snap.byPick.find((p) => p.pickCode === pickCode);
+  if (pickStat && pickStat.plays >= 12 && pickStat.winRate < 0.58) {
+    analysis.push(
+      `Rejected: ${pickCode} historical win rate ${Math.round(pickStat.winRate * 100)}% < 58%`,
+    );
+    return null;
+  }
+  const lgStat = snap.byLeaguePick.find(
+    (p) => p.league === (ev.league || "unknown") && p.pickCode === pickCode,
   );
-}
-
-async function maybeAiRationale(
-  legs: BookableLeg[],
-  totalOdds: number,
-  conf: number,
-  advice: string[],
-): Promise<string> {
-  const text = await chatPlain({
-    system:
-      "You explain football betting slips briefly and honestly. Never claim a lock. 2 short sentences. Prefer quality over tiny odds.",
-    user: `Explain this ${legs.length}-fold SportyBet slip. Odds ${totalOdds.toFixed(2)}, conf ${Math.round(conf * 100)}%. Learning: ${advice.join(" | ")}. Legs: ${JSON.stringify(
-      legs.map((l) => ({ match: `${l.home} vs ${l.away}`, pick: l.pickLabel, odds: l.odds })),
-    )}`,
-    temperature: 0.35,
-    maxTokens: 180,
-  });
-  return text || buildRationaleFallback(legs, totalOdds, conf, advice);
-}
-
-type AiScoutPlan = {
-  slips?: {
-    slot?: number;
-    rationale?: string;
-    legs?: { eventId: string; pickCode: string }[];
-  }[];
-  notes?: string;
-};
-
-async function aiScoutSlips(
-  candidates: BookableLeg[],
-  history: PastOutcomeSample[],
-  snap: LearningSnapshot,
-  count: number,
-): Promise<SureSlip[] | null> {
-  if (!process.env.OPENAI_API_KEY || candidates.length < 3) return null;
-
-  const byEvent = new Map<string, BookableLeg[]>();
-  for (const leg of candidates) {
-    const list = byEvent.get(leg.eventId) ?? [];
-    list.push(leg);
-    byEvent.set(leg.eventId, list);
+  if (lgStat && lgStat.plays >= 6 && lgStat.winRate < 0.55) {
+    analysis.push(
+      `Rejected: weak in ${ev.league} for ${pickCode} (${Math.round(lgStat.winRate * 100)}%)`,
+    );
+    return null;
   }
 
-  const board = [...byEvent.entries()]
-    .map(([eventId, legs]) => {
-      const scored = [...legs].sort(
-        (a, b) => scoreLeg(b, snap) - scoreLeg(a, snap),
-      );
-      return {
-        eventId,
-        match: `${legs[0].home} vs ${legs[0].away}`,
-        league: legs[0].league ?? "",
-        kickoff: new Date(legs[0].kickoff).toISOString(),
-        options: scored.slice(0, 4).map((l) => ({
-          pickCode: l.pickCode,
-          label: l.pickLabel,
-          odds: Number(l.odds.toFixed(2)),
-          score: Number(scoreLeg(l, snap).toFixed(3)),
-        })),
-      };
-    })
-    .sort(
-      (a, b) => (b.options[0]?.score ?? 0) - (a.options[0]?.score ?? 0),
-    )
-    .slice(0, 28);
+  let score = scoreLeg(leg, snap);
+  // Boost clear fav alignment
+  if (probs && favSide === "home" && ["DC1X", "DNBH", "HO05"].includes(pickCode)) {
+    score += probs.home * 0.8;
+    analysis.push("Aligned with home favourite");
+  }
+  if (probs && favSide === "away" && ["DCX2", "DNBA", "AO05"].includes(pickCode)) {
+    score += probs.away * 0.8;
+    analysis.push("Aligned with away favourite");
+  }
+  // Prefer shorter elite prices for hit rate
+  if (odds <= 1.4) score += 0.35;
+  else if (odds <= 1.55) score += 0.15;
 
-  const plan = await chatJson<AiScoutPlan>({
-    system: `You are SureCode's SportyBet scout (Nigeria).
-Build SHARP slips: FEWER legs, BETTER prices — users hate 5+ tiny-odds games.
-Allowed pickCodes: ${QUALITY_PICK_CODES.join(", ")}.
-Rules:
-- Each slip: exactly 2 or 3 legs from DIFFERENT eventIds.
-- Prefer combined odds ${MIN_SLIP_ODDS}–${MAX_SLIP_ODDS} (sweet spot ~5–9).
-- Prefer options with higher "score" and historically strong pick/league win rates.
-- Avoid ultra-short prices; pick quality mid-odds favourites / DC / O1.5 / BTTS when justified.
-- Never invent eventIds or pickCodes.
-Return JSON: {"slips":[{"slot":1,"rationale":"...","legs":[{"eventId":"...","pickCode":"1"}]}],"notes":"..."}
-Provide exactly ${count} slips when possible.`,
-    user: JSON.stringify({
-      goal: "Best quality codes — fewer games, stronger odds",
-      learning: formatLearningForAi(snap),
-      recentSlipOutcomes: history.slice(0, 12),
-      board,
-      slipCount: count,
-    }),
-    temperature: 0.2,
-    maxTokens: 1100,
-  });
-
-  if (!plan?.slips?.length) return null;
-
-  const eventMap = new Map(candidates.map((c) => [c.eventId + "|" + c.pickCode, c]));
-  const fixturesById = new Map<string, SbEvent>();
-  for (const c of candidates) {
-    if (!fixturesById.has(c.eventId)) {
-      fixturesById.set(c.eventId, {
-        eventId: c.eventId,
-        home: c.home,
-        away: c.away,
-        league: c.league,
-        kickoff: c.kickoff,
-        outcomes: {},
-      });
-    }
-    fixturesById.get(c.eventId)!.outcomes[c.pickCode] = c.odds;
+  if (score < MIN_LEG_SCORE) {
+    analysis.push(`Rejected: score ${score.toFixed(2)} below ${MIN_LEG_SCORE}`);
+    return null;
   }
 
-  const slips: SureSlip[] = [];
-  for (let i = 0; i < plan.slips.length && slips.length < count; i++) {
-    const raw = plan.slips[i];
-    const used = new Set<string>();
-    const legs: BookableLeg[] = [];
-    for (const sel of raw.legs ?? []) {
-      if (!sel?.eventId || !sel?.pickCode) continue;
-      if (used.has(sel.eventId)) continue;
-      const leg =
-        eventMap.get(sel.eventId + "|" + sel.pickCode) ??
-        (() => {
-          const ev = fixturesById.get(sel.eventId);
-          return ev ? legFromEventPick(ev, sel.pickCode) : null;
-        })();
-      if (!leg) continue;
-      used.add(sel.eventId);
-      legs.push(leg);
-      if (legs.length >= 3) break;
-    }
-    if (legs.length < 2) continue;
-    const totalOdds = legs.reduce((acc, l) => acc * l.odds, 1);
-    if (totalOdds < MIN_SLIP_ODDS * 0.85 || totalOdds > MAX_SLIP_ODDS * 1.15) {
-      // Soft reject extreme slips
-      if (totalOdds < 2.8 || totalOdds > 18) continue;
-    }
-    const confidence = legs.reduce((acc, l) => acc * l.implied, 1);
-    const rationale =
-      (raw.rationale && raw.rationale.trim()) ||
-      (await maybeAiRationale(legs, totalOdds, confidence, snap.advice));
-    const booked = await createBookingCode(legs);
-    slips.push({
-      slot: slips.length + 1,
-      legs,
-      totalOdds,
-      confidence,
-      rationale,
-      code: booked.code,
-      shareUrl: booked.code ? booked.url || sportyOpenUrl(booked.code) : undefined,
-      error: booked.error,
-    });
+  if (pickStat && pickStat.plays >= 8) {
+    analysis.push(
+      `History ${pickCode}: ${Math.round(pickStat.winRate * 100)}% of ${pickStat.plays}`,
+    );
   }
 
-  return slips.length ? slips : null;
+  return {
+    ...leg,
+    score,
+    analysis,
+    favSide,
+    marketImplied: leg.implied,
+  };
 }
 
-function expandCandidates(fixtures: SbEvent[]): BookableLeg[] {
-  const out: BookableLeg[] = [];
+function buildPool(fixtures: SbEvent[], snap: LearningSnapshot): AnalyzedLeg[] {
+  const pool: AnalyzedLeg[] = [];
+  const usedEvents = new Set<string>();
+
+  const all: AnalyzedLeg[] = [];
   for (const ev of fixtures) {
     for (const code of QUALITY_PICK_CODES) {
-      const leg = legFromEventPick(ev, code);
-      if (leg) out.push(leg);
+      const a = analyzeEventPick(ev, code, snap);
+      if (a) all.push(a);
     }
   }
-  return out;
-}
+  all.sort((a, b) => b.score - a.score);
 
-function heuristicSlips(
-  candidates: BookableLeg[],
-  snap: LearningSnapshot,
-  count: number,
-): Promise<SureSlip[]> {
-  const ranked = [...candidates].sort(
-    (a, b) => scoreLeg(b, snap) - scoreLeg(a, snap),
-  );
-
-  const usedEvents = new Set<string>();
-  const usedLeagues = new Map<string, number>();
-  const pool: BookableLeg[] = [];
-  for (const leg of ranked) {
+  const leagueCount = new Map<string, number>();
+  for (const leg of all) {
     if (usedEvents.has(leg.eventId)) continue;
+    // One best pick per match only
+    const bestForEvent = all
+      .filter((x) => x.eventId === leg.eventId)
+      .sort((a, b) => b.score - a.score)[0];
+    if (bestForEvent.pickCode !== leg.pickCode) continue;
+
     const lg = leg.league || "unknown";
-    if ((usedLeagues.get(lg) ?? 0) >= 2) continue;
+    if ((leagueCount.get(lg) ?? 0) >= 2) continue;
+
     usedEvents.add(leg.eventId);
-    usedLeagues.set(lg, (usedLeagues.get(lg) ?? 0) + 1);
+    leagueCount.set(lg, (leagueCount.get(lg) ?? 0) + 1);
     pool.push(leg);
-    if (pool.length >= 18) break;
+    if (pool.length >= 16) break;
   }
-
-  return (async () => {
-    const slips: SureSlip[] = [];
-    // 2-fold, 3-fold, 2-fold — fewer games
-    const sizes = [2, 3, 2];
-    let cursor = 0;
-    for (let slot = 1; slot <= count; slot++) {
-      const n = sizes[(slot - 1) % sizes.length];
-      let legs = pool.slice(cursor, cursor + n);
-      cursor += n;
-      if (legs.length < 2) break;
-
-      let totalOdds = legs.reduce((acc, l) => acc * l.odds, 1);
-      // If too short, try swap last leg for higher odds from remaining pool
-      if (totalOdds < MIN_SLIP_ODDS && cursor < pool.length) {
-        const alt = pool[cursor];
-        if (alt && !legs.some((l) => l.eventId === alt.eventId)) {
-          legs = [...legs.slice(0, -1), alt];
-          cursor++;
-          totalOdds = legs.reduce((acc, l) => acc * l.odds, 1);
-        }
-      }
-
-      const confidence = legs.reduce((acc, l) => acc * l.implied, 1);
-      const rationale = await maybeAiRationale(
-        legs,
-        totalOdds,
-        confidence,
-        snap.advice,
-      );
-      const booked = await createBookingCode(legs);
-      slips.push({
-        slot,
-        legs,
-        totalOdds,
-        confidence,
-        rationale,
-        code: booked.code,
-        shareUrl: booked.code ? booked.url || sportyOpenUrl(booked.code) : undefined,
-        error: booked.error,
-      });
-    }
-    return slips;
-  })();
+  return pool;
 }
 
+async function explainSlip(
+  legs: AnalyzedLeg[],
+  totalOdds: number,
+  conf: number,
+  snap: LearningSnapshot,
+): Promise<string> {
+  const analysisBlock = legs
+    .map(
+      (l) =>
+        `${l.home} vs ${l.away} → ${l.pickLabel} @ ${l.odds.toFixed(2)} | score ${l.score.toFixed(2)} | ${l.analysis.join("; ")}`,
+    )
+    .join("\n");
+
+  const text = await chatPlain({
+    system:
+      "You are a cautious football analyst. Explain why this HIGH-HIT slip was chosen after full analysis. Never claim a guarantee. 3 short sentences max. Focus on favourite strength, market, and why fewer legs raise win chance.",
+    user: `High-hit SureCode slip. Combined odds ${totalOdds.toFixed(2)}, joint implied ~${Math.round(conf * 100)}%.\nLearning tips: ${snap.advice.join(" | ")}\nAnalysis:\n${analysisBlock}`,
+    temperature: 0.25,
+    maxTokens: 220,
+  });
+
+  if (text) return text;
+
+  return (
+    `High-hit ${legs.length === 1 ? "single" : "2-fold"} after full 1X2 + history filter. ` +
+    `Odds ~${totalOdds.toFixed(2)} · model ~${Math.round(conf * 100)}%. ` +
+    legs.map((l) => `${l.home}/${l.away} ${l.pickLabel}`).join(" · ") +
+    `. Not a guarantee.`
+  );
+}
+
+async function bookSlip(
+  slot: number,
+  legs: AnalyzedLeg[],
+  snap: LearningSnapshot,
+): Promise<SureSlip | null> {
+  if (!legs.length) return null;
+  const totalOdds = legs.reduce((a, l) => a * l.odds, 1);
+  if (legs.length >= 2 && totalOdds > MAX_DOUBLE_ODDS) return null;
+  const confidence = legs.reduce((a, l) => a * l.implied, 1);
+  // Joint confidence floor for doubles
+  if (legs.length >= 2 && confidence < 0.38) return null;
+
+  const rationale = await explainSlip(legs, totalOdds, confidence, snap);
+  const booked = await createBookingCode(legs);
+  return {
+    slot,
+    legs,
+    totalOdds,
+    confidence,
+    rationale,
+    code: booked.code,
+    shareUrl: booked.code ? booked.url || sportyOpenUrl(booked.code) : undefined,
+    error: booked.error,
+  };
+}
+
+/**
+ * Build up to N high-hit slips: slot1 single, slot2 single, slot3 optional 2-fold.
+ */
 export async function buildSureSlipsOfDay(
   count = 3,
-  history: PastOutcomeSample[] = [],
+  _history: PastOutcomeSample[] = [],
   opts: { allowAi?: boolean; legHistory?: LegHistoryRow[] } = {},
 ): Promise<SureSlip[]> {
   const now = Date.now();
-  const fixtures = (await getSportyFixtures(fixturePageBudget())).filter(
-    (e) => e.kickoff > now + 30 * 60_000 && e.kickoff < now + 36 * 3600_000,
+  // Prefer fixtures kicking off in 2–30h (more stable odds than far fixtures)
+  const fixtures = (await getSportyFixtures(Math.max(fixturePageBudget(), 6))).filter(
+    (e) => e.kickoff > now + 90 * 60_000 && e.kickoff < now + 30 * 3600_000,
   );
 
   const snap = buildLearningSnapshot(opts.legHistory ?? []);
-  const candidates = expandCandidates(fixtures);
-  if (candidates.length < 2) return [];
+  const pool = buildPool(fixtures, snap);
+  if (!pool.length) return [];
 
-  // Prefer historically strong markets when we have enough data
-  const scored = [...candidates].sort(
-    (a, b) => scoreLeg(b, snap) - scoreLeg(a, snap),
-  );
+  const slips: SureSlip[] = [];
+  const used = new Set<string>();
 
-  const allowAi = opts.allowAi !== false;
-  if (allowAi) {
-    const ai = await aiScoutSlips(scored, history, snap, count);
-    if (ai?.length) return ai;
+  // Slots: single, single, then safest 2-fold from remaining elites
+  const plan: ("single" | "double")[] = [];
+  for (let i = 0; i < count; i++) {
+    plan.push(i < 2 || count === 1 ? "single" : "double");
+  }
+  // Always prefer more singles if pool is thin
+  if (pool.length < 4) {
+    for (let i = 0; i < plan.length; i++) plan[i] = "single";
   }
 
-  return heuristicSlips(scored, snap, count);
+  let cursor = 0;
+  for (let i = 0; i < plan.length && slips.length < count; i++) {
+    if (plan[i] === "single") {
+      while (cursor < pool.length && used.has(pool[cursor].eventId)) cursor++;
+      if (cursor >= pool.length) break;
+      const leg = pool[cursor++];
+      used.add(leg.eventId);
+      const slip = await bookSlip(slips.length + 1, [leg], snap);
+      if (slip?.code) slips.push(slip);
+      continue;
+    }
+
+    // double: take next two unused elites with combined odds under cap
+    const pair: AnalyzedLeg[] = [];
+    for (let j = cursor; j < pool.length && pair.length < 2; j++) {
+      if (used.has(pool[j].eventId)) continue;
+      pair.push(pool[j]);
+    }
+    if (pair.length < 2) {
+      // fallback single
+      while (cursor < pool.length && used.has(pool[cursor].eventId)) cursor++;
+      if (cursor >= pool.length) break;
+      const leg = pool[cursor++];
+      used.add(leg.eventId);
+      const slip = await bookSlip(slips.length + 1, [leg], snap);
+      if (slip?.code) slips.push(slip);
+      continue;
+    }
+    const combo = pair[0].odds * pair[1].odds;
+    if (combo > MAX_DOUBLE_ODDS) {
+      // book best as single instead
+      used.add(pair[0].eventId);
+      const slip = await bookSlip(slips.length + 1, [pair[0]], snap);
+      if (slip?.code) slips.push(slip);
+      continue;
+    }
+    used.add(pair[0].eventId);
+    used.add(pair[1].eventId);
+    const slip = await bookSlip(slips.length + 1, pair, snap);
+    if (slip?.code) slips.push(slip);
+  }
+
+  void opts.allowAi; // high-hit path is deterministic analysis-first
+  return slips;
 }
 
 export function lagosDay(d = new Date()): string {

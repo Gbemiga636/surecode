@@ -23,7 +23,7 @@ const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
     title: "Sure codes of the day",
-    subtitle: "2–3 quality games · stronger odds — open, copy, or demo-stake",
+    subtitle: "High-hit mode · singles & rare 2-folds after full analysis",
   },
   "/edit": {
     title: "Edit long codes",
