@@ -7,11 +7,11 @@ import { Icon, type IconName } from "./Icons";
 
 const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
   { href: "/home", label: "Sure codes", icon: "shield" },
+  { href: "/builder", label: "Build combos", icon: "layers" },
   { href: "/edit", label: "Edit long codes", icon: "layers" },
+  { href: "/picks", label: "Overall picks", icon: "target" },
   { href: "/codes", label: "Plenty codes", icon: "dashboard" },
   { href: "/predictions", label: "Predictions", icon: "calendar" },
-  { href: "/expert", label: "Expert picks", icon: "target" },
-  { href: "/value", label: "Value picks", icon: "gem" },
   { href: "/analysis", label: "AI analysis", icon: "pulse" },
   { href: "/combos", label: "Value combos", icon: "layers" },
   { href: "/saved", label: "Saved codes", icon: "bookmark" },
@@ -25,9 +25,17 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
     title: "Sure codes of the day",
     subtitle: "High-hit mode · singles & rare 2-folds after full analysis",
   },
+  "/builder": {
+    title: "Build your combos",
+    subtitle: "Pick markets → AI ranks fixtures → SportyBet codes",
+  },
   "/edit": {
     title: "Edit long codes",
     subtitle: "Paste a long SportyBet code → shorter high-probability rebuilds",
+  },
+  "/picks": {
+    title: "Overall picks",
+    subtitle: "Expert + value merged — one board for the day’s best legs",
   },
   "/codes": {
     title: "Plenty of codes",
@@ -38,12 +46,12 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Tip-style favourites from live odds — select and book a code",
   },
   "/expert": {
-    title: "Expert picks",
-    subtitle: "Confidence-ranked picks — estimates, never guarantees",
+    title: "Overall picks",
+    subtitle: "Redirected — expert + value live on Overall picks",
   },
   "/value": {
-    title: "Value picks",
-    subtitle: "Bigger-price opportunities where the model beats the market",
+    title: "Overall picks",
+    subtitle: "Redirected — expert + value live on Overall picks",
   },
   "/analysis": {
     title: "AI match analysis",

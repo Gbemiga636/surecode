@@ -181,12 +181,8 @@ export async function runSureCrawl(): Promise<CrawlResult> {
   let slips: Awaited<ReturnType<typeof buildSureSlipsOfDay>> = [];
 
   try {
-    settledTotal += await settlePendingCodes(sb, deadline, 10, 6);
-    if (deadline.ok(1500)) {
-      historyLegs += await backfillWonSlips(sb, deadline);
-    }
-
-    if (deadline.ok(4000)) {
+    // Sure slips first — settling can eat the whole serverless budget.
+    if (deadline.ok(8_000)) {
       const [history, legHistory] = await Promise.all([
         loadPastHistory(sb),
         loadLegHistory(sb),
@@ -236,6 +232,13 @@ export async function runSureCrawl(): Promise<CrawlResult> {
         }
         written++;
       }
+    }
+
+    if (deadline.ok(2_000)) {
+      settledTotal += await settlePendingCodes(sb, deadline, 8, 5);
+    }
+    if (deadline.ok(1_500)) {
+      historyLegs += await backfillWonSlips(sb, deadline);
     }
 
     if (deadline.ok(5000)) {
