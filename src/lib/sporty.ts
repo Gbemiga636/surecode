@@ -1,16 +1,42 @@
 /**
  * SportyBet public fixtures + share-code booking (no API key).
+ * Multi-sport: football, basketball, tennis, ice hockey, baseball.
  */
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-const EVENTS_API =
-  "https://www.sportybet.com/api/ng/factsCenter/pcUpcomingEvents?sportId=sr%3Asport%3A1&marketId=1%2C10%2C11%2C18%2C19%2C20%2C29&pageSize=100&option=1&pageNum=";
-
 const SHARE_API = "https://www.sportybet.com/api/ng/orders/share";
 const EVENT_API = "https://www.sportybet.com/api/ng/factsCenter/event?eventId=";
 
+export type SportKey = "football" | "basketball" | "tennis" | "hockey" | "baseball";
+
+export const SPORTY_SPORTS: {
+  key: SportKey;
+  id: string;
+  label: string;
+  markets: string;
+  pages: number;
+}[] = [
+  { key: "football", id: "sr:sport:1", label: "Football", markets: "1,10,11,18,19,20,29", pages: 5 },
+  { key: "basketball", id: "sr:sport:2", label: "Basketball", markets: "219,225", pages: 3 },
+  { key: "tennis", id: "sr:sport:5", label: "Tennis", markets: "186", pages: 3 },
+  { key: "hockey", id: "sr:sport:4", label: "Ice Hockey", markets: "1,10,18", pages: 2 },
+  { key: "baseball", id: "sr:sport:3", label: "Baseball", markets: "1", pages: 2 },
+];
+
+function eventsUrl(sportId: string, markets: string, page: number) {
+  return (
+    `https://www.sportybet.com/api/ng/factsCenter/pcUpcomingEvents` +
+    `?sportId=${encodeURIComponent(sportId)}` +
+    `&marketId=${encodeURIComponent(markets)}` +
+    `&pageSize=100&option=1&pageNum=${page}`
+  );
+}
+
+/** @deprecated football-only URL kept for any external refs */
+const EVENTS_API = eventsUrl("sr:sport:1", "1,10,11,18,19,20,29", 1).replace(/pageNum=1$/, "pageNum=");
+void EVENTS_API;
 /** Reverse lookup: SportyBet market/outcome → our pick code */
 export function pickCodeForBooking(
   marketId: string,
@@ -64,6 +90,10 @@ export const PICKS: Record<
   BTTSN: { marketId: "29", specifier: "", outcomeId: "76", label: "Both Teams NOT To Score", market: "BTTS" },
   HO05: { marketId: "19", specifier: "total=0.5", outcomeId: "12", label: "Home Over 0.5 Goals", market: "Team Goals" },
   AO05: { marketId: "20", specifier: "total=0.5", outcomeId: "12", label: "Away Over 0.5 Goals", market: "Team Goals" },
+  BBH: { marketId: "219", specifier: "", outcomeId: "4", label: "Home Win", market: "Winner" },
+  BBA: { marketId: "219", specifier: "", outcomeId: "5", label: "Away Win", market: "Winner" },
+  TNH: { marketId: "186", specifier: "", outcomeId: "4", label: "Home Win", market: "Winner" },
+  TNA: { marketId: "186", specifier: "", outcomeId: "5", label: "Away Win", market: "Winner" },
 };
 
 /** High hit-rate markets for “sure” slips */
@@ -207,6 +237,8 @@ export type SbEvent = {
   league?: string;
   kickoff: number;
   outcomes: Record<string, number>;
+  sport?: SportKey;
+  sportLabel?: string;
 };
 
 export type BookableLeg = {
@@ -222,6 +254,8 @@ export type BookableLeg = {
   pickLabel: string;
   odds: number;
   implied: number;
+  sport?: SportKey;
+  sportLabel?: string;
 };
 
 const headers = {
@@ -243,7 +277,12 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
-function parseEvent(e: Record<string, unknown>, league?: string): SbEvent | null {
+function parseEvent(
+  e: Record<string, unknown>,
+  league: string | undefined,
+  sport: SportKey = "football",
+  sportLabel = "Football",
+): SbEvent | null {
   if (!e.eventId || !e.homeTeamName || !e.awayTeamName) return null;
   const outcomes: Record<string, number> = {};
   for (const m of (e.markets as Record<string, unknown>[]) ?? []) {
@@ -265,26 +304,68 @@ function parseEvent(e: Record<string, unknown>, league?: string): SbEvent | null
     league,
     kickoff: Number(e.estimateStartTime) || Number(e.startTime) || 0,
     outcomes,
+    sport,
+    sportLabel,
   };
 }
 
-export async function getSportyFixtures(maxPages = 8): Promise<SbEvent[]> {
+async function fetchSportFixtures(
+  sport: (typeof SPORTY_SPORTS)[number],
+  maxPages: number,
+): Promise<SbEvent[]> {
   const out: SbEvent[] = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const json = (await fetchJson(EVENTS_API + page).catch(() => null)) as {
+  const pages = Math.min(maxPages, sport.pages);
+  for (let page = 1; page <= pages; page++) {
+    const json = (await fetchJson(eventsUrl(sport.id, sport.markets, page)).catch(
+      () => null,
+    )) as {
       data?: { tournaments?: { name?: string; events?: Record<string, unknown>[] }[] };
     } | null;
     const tours = json?.data?.tournaments ?? [];
     let added = 0;
     for (const t of tours) {
       for (const e of t.events ?? []) {
-        const parsed = parseEvent(e, t.name ? String(t.name) : undefined);
+        const parsed = parseEvent(
+          e,
+          t.name ? String(t.name) : undefined,
+          sport.key,
+          sport.label,
+        );
         if (!parsed) continue;
         out.push(parsed);
         added++;
       }
     }
     if (!added) break;
+  }
+  return out;
+}
+
+/** Football fixtures (legacy). */
+export async function getSportyFixtures(maxPages = 8): Promise<SbEvent[]> {
+  const football = SPORTY_SPORTS.find((s) => s.key === "football")!;
+  return fetchSportFixtures(football, maxPages);
+}
+
+/** All sports — football + basketball + tennis + hockey + baseball. */
+export async function getAllSportyFixtures(opts?: {
+  maxPagesPerSport?: number;
+  sports?: SportKey[];
+}): Promise<SbEvent[]> {
+  const keys = opts?.sports ?? SPORTY_SPORTS.map((s) => s.key);
+  const maxPages = opts?.maxPagesPerSport ?? 3;
+  const selected = SPORTY_SPORTS.filter((s) => keys.includes(s.key));
+  const batches = await Promise.all(
+    selected.map((s) => fetchSportFixtures(s, maxPages).catch(() => [] as SbEvent[])),
+  );
+  const seen = new Set<string>();
+  const out: SbEvent[] = [];
+  for (const batch of batches) {
+    for (const ev of batch) {
+      if (seen.has(ev.eventId)) continue;
+      seen.add(ev.eventId);
+      out.push(ev);
+    }
   }
   return out;
 }
@@ -533,6 +614,12 @@ export function settlePick(pickCode: string, home: number, away: number): boolea
       return home > 0.5;
     case "AO05":
       return away > 0.5;
+    case "BBH":
+    case "TNH":
+      return home > away;
+    case "BBA":
+    case "TNA":
+      return home < away;
     default:
       return null;
   }

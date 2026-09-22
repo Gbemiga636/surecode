@@ -4,8 +4,10 @@ import { lagosDay } from "@/lib/sure-engine";
 import { sportyOpenUrl } from "@/lib/sporty";
 import { PageHeader } from "@/components/PageHeader";
 import { CodeActions } from "@/components/CodeActions";
-import { SoccerBall, GoalPosts } from "@/components/PitchArt";
 import { ReadMore } from "@/components/ReadMore";
+import { GoalBurst, SportChip, TrackStrip } from "@/components/SureArena";
+
+export const dynamic = "force-dynamic";
 
 type SureCodeRow = {
   id: string;
@@ -14,12 +16,15 @@ type SureCodeRow = {
   share_url: string | null;
   total_odds: number | null;
   confidence: number | null;
+  outcome?: string | null;
   legs: {
     home: string;
     away: string;
     pickLabel: string;
     odds: number;
     kickoff?: number;
+    sport?: string;
+    sportLabel?: string;
   }[];
   rationale: string | null;
 };
@@ -38,55 +43,71 @@ function formatKick(ms?: number) {
   }
 }
 
+function isWon(o?: string | null) {
+  const u = String(o || "").toUpperCase();
+  return u === "WON" || u === "WIN";
+}
+function isLost(o?: string | null) {
+  const u = String(o || "").toUpperCase();
+  return u === "LOST" || u === "LOSS";
+}
+
 export default async function HomePage() {
   const supabase = await createClient();
   const day = lagosDay();
-  const { data: codes } = await supabase
-    .from(T.sureCodes)
-    .select("*")
-    .eq("day", day)
-    .order("slot", { ascending: true });
+  const since = new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10);
+
+  const [{ data: codes }, { data: history }] = await Promise.all([
+    supabase.from(T.sureCodes).select("*").eq("day", day).order("slot", { ascending: true }),
+    supabase
+      .from(T.sureCodes)
+      .select("outcome,total_odds")
+      .gte("day", since)
+      .in("outcome", ["WON", "LOST", "WIN", "LOSS", "PENDING"]),
+  ]);
 
   const rows = (codes ?? []) as SureCodeRow[];
+  const hist = history ?? [];
+  const won = hist.filter((r) => isWon(r.outcome)).length;
+  const lost = hist.filter((r) => isLost(r.outcome)).length;
+  const pending = hist.filter((r) => String(r.outcome).toUpperCase() === "PENDING").length;
+  const settled = won + lost;
+  const winRate = settled ? Math.round((won / settled) * 1000) / 10 : null;
   const latest = rows[0];
 
   return (
-    <div>
+    <div className="sure-home">
       <PageHeader
-        kicker="Today"
+        kicker="Max-hit · all sports"
         title="Sure codes"
-        subtitle={`${day} · High-hit mode: mostly singles / rare 2-folds after full 1X2 + history analysis.`}
+        subtitle={`${day} · Singles only across football, basketball, tennis & more — full AI analysis on every slip.`}
       />
 
+      <TrackStrip won={won} lost={lost} pending={pending} winRate={winRate} />
+
       {latest && (
-        <div className="hero-panel sc-rise mb-6">
+        <div className="hero-panel hero-sport sc-rise mb-6">
           <span className="hero-aurora" aria-hidden />
           <span className="hero-ring" aria-hidden />
-          <span className="spark" style={{ right: 70, top: "22%" }} aria-hidden />
-          <span
-            className="spark"
-            style={{ right: 200, top: "68%", width: 4, height: 4, animationDelay: "1.8s" }}
-            aria-hidden
-          />
-          <div className="absolute right-6 top-1/2 z-[1] -translate-y-1/2 max-[860px]:right-3 max-[860px]:top-4 max-[860px]:translate-y-0">
-            <SoccerBall />
+          <div className="hero-arena">
+            <GoalBurst />
           </div>
-          <GoalPosts />
-          <div className="relative z-[2] p-6 pr-[160px] max-[860px]:pr-6 sm:p-8 sm:pr-[160px]">
+          <div className="relative z-[2] p-6 pr-[200px] max-[900px]:pr-6 sm:p-8 sm:pr-[220px]">
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
-              Latest sure code · slip {latest.slot} · high-hit
-            </p>
-            <p className="mt-3 font-mono text-3xl font-extrabold tracking-[0.12em] text-[var(--ink)] sm:text-4xl">
-              {latest.code}
-            </p>
-            <p className="mt-2 text-sm text-[var(--muted)]">
-              {(latest.legs ?? []).length} games · odds{" "}
-              <span className="font-semibold text-[var(--ink)]">
-                {latest.total_odds != null ? Number(latest.total_odds).toFixed(2) : "—"}
-              </span>
+              Top sure single · slip {latest.slot}
               {latest.confidence != null
                 ? ` · ~${Math.round(Number(latest.confidence) * 100)}% model`
                 : ""}
+            </p>
+            <p className="mt-3 font-mono text-3xl font-extrabold tracking-[0.14em] text-[var(--ink)] sm:text-5xl">
+              {latest.code}
+            </p>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              {(latest.legs ?? [])[0]?.sportLabel || (latest.legs ?? [])[0]?.sport || "Multi-sport"}{" "}
+              · odds{" "}
+              <span className="font-semibold text-[var(--ink)]">
+                {latest.total_odds != null ? Number(latest.total_odds).toFixed(2) : "—"}
+              </span>
             </p>
             <div className="mt-5">
               <CodeActions
@@ -101,27 +122,33 @@ export default async function HomePage() {
 
       {!rows.length && (
         <div className="sc-empty sc-rise">
-          <p className="font-display text-lg font-bold text-[var(--ink)]">Codes are warming up</p>
+          <p className="font-display text-lg font-bold text-[var(--ink)]">Arena warming up</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--muted)]">
-            The crawler publishes every ~20 minutes. Run{" "}
-            <code className="rounded-md bg-black/[0.05] px-1.5 py-0.5 text-xs text-[var(--ink)]">npm run crawl</code> once
-            if this is empty.
+            Scanning all SportyBet sports for the surest singles. Run a crawl if this stays empty.
           </p>
         </div>
       )}
 
       <div className="space-y-4">
-        {rows.map((c) => {
+        {rows.map((c, idx) => {
           const openUrl = c.share_url || sportyOpenUrl(c.code);
           const conf = c.confidence != null ? Math.round(Number(c.confidence) * 100) : null;
+          const leg0 = (c.legs ?? [])[0];
           return (
-            <article key={c.id} className="sc-card sc-rise overflow-hidden p-0">
+            <article
+              key={c.id}
+              className="sc-card sure-slip sc-rise overflow-hidden p-0"
+              style={{ animationDelay: `${idx * 80}ms` }}
+            >
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-5 py-4 sm:px-6">
                 <div>
-                  <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
-                    Slip {c.slot}
-                    {conf != null ? ` · ${conf}% model` : ""}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
+                      Slip {c.slot}
+                      {conf != null ? ` · ${conf}%` : ""}
+                    </p>
+                    <SportChip sport={leg0?.sportLabel || leg0?.sport} />
+                  </div>
                   <p className="mt-1.5 font-mono text-2xl font-extrabold tracking-wider text-[var(--ink)]">
                     {c.code}
                   </p>
@@ -130,6 +157,7 @@ export default async function HomePage() {
                     <span className="font-semibold text-[var(--ink)]">
                       {c.total_odds != null ? Number(c.total_odds).toFixed(2) : "—"}
                     </span>
+                    {" · "}single
                   </p>
                 </div>
                 <CodeActions code={c.code} openUrl={openUrl} sureCodeId={c.id} />
@@ -144,8 +172,8 @@ export default async function HomePage() {
                     >
                       <div>
                         <p className="font-semibold text-[var(--ink)]">
-                          {leg.home} <span className="font-normal text-[var(--muted)]">vs</span>{" "}
-                          {leg.away}
+                          {leg.home}{" "}
+                          <span className="font-normal text-[var(--muted)]">vs</span> {leg.away}
                         </p>
                         <p className="mt-0.5 text-[var(--muted)]">
                           {leg.pickLabel}
@@ -160,8 +188,9 @@ export default async function HomePage() {
                 })}
               </ul>
               {c.rationale && (
-                <div className="mx-5 mb-5 rounded-2xl bg-[rgba(13,159,110,0.06)] px-4 py-3 sm:mx-6">
-                  <ReadMore text={c.rationale} limit={110} />
+                <div className="analysis-panel mx-5 mb-5 sm:mx-6">
+                  <p className="analysis-kicker">Full AI analysis</p>
+                  <ReadMore text={c.rationale} limit={160} />
                 </div>
               )}
             </article>

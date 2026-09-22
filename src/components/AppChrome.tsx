@@ -23,7 +23,7 @@ const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
     title: "Sure codes of the day",
-    subtitle: "High-hit mode · singles & rare 2-folds after full analysis",
+    subtitle: "Max-hit singles · all SportyBet sports · full AI analysis",
   },
   "/builder": {
     title: "Build your combos",
