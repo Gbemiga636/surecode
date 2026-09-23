@@ -87,39 +87,3 @@ export function SportChip({
     </span>
   );
 }
-
-export function TrackStrip({
-  won,
-  lost,
-  pending,
-  winRate,
-}: {
-  won: number;
-  lost: number;
-  pending: number;
-  winRate: number | null;
-}) {
-  return (
-    <div className="track-strip sc-rise">
-      <div className="track-item">
-        <span className="track-label">Sure track</span>
-        <span className="track-value accent">
-          {winRate != null ? `${winRate}%` : "—"}
-        </span>
-        <span className="track-sub">settled win rate</span>
-      </div>
-      <div className="track-item">
-        <span className="track-label">Won</span>
-        <span className="track-value good">{won}</span>
-      </div>
-      <div className="track-item">
-        <span className="track-label">Lost</span>
-        <span className="track-value bad">{lost}</span>
-      </div>
-      <div className="track-item">
-        <span className="track-label">Live</span>
-        <span className="track-value">{pending}</span>
-      </div>
-    </div>
-  );
-}

@@ -189,7 +189,11 @@ export async function runSureCrawl(): Promise<CrawlResult> {
       ]);
       historyLegs = Math.max(historyLegs, legHistory.length);
       const allowAi = deadline.ok(12_000) && Boolean(process.env.OPENAI_API_KEY);
-      slips = await buildSureSlipsOfDay(3, history, { allowAi, legHistory });
+      slips = await buildSureSlipsOfDay(3, history, {
+        allowAi,
+        legHistory,
+        modes: ["safe", "boost"],
+      });
 
       for (const slip of slips) {
         if (!slip.code) continue;

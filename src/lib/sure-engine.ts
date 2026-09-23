@@ -1,6 +1,8 @@
 /**
- * Max-hit SureCode engine — multi-sport singles only.
- * Past data: singles ~62% vs doubles ~43%. Priority = win rate / profit survival.
+ * SureCode engine — two user modes:
+ *  - safe:  short-odds singles (max hit rate)
+ *  - boost: larger odds still filtered as sure (singles or rare 2-folds)
+ * Multi-sport: football, basketball, tennis, hockey, baseball.
  */
 import {
   createBookingCode,
@@ -19,9 +21,14 @@ import {
   type LearningSnapshot,
   type LegHistoryRow,
 } from "./learning";
+import { modeForSlot, slotsForMode, type SureMode } from "./sure-mode";
+
+export type { SureMode };
+export { modeForSlot, slotsForMode };
 
 export type SureSlip = {
   slot: number;
+  mode: SureMode;
   legs: BookableLeg[];
   totalOdds: number;
   confidence: number;
@@ -38,7 +45,6 @@ export type PastOutcomeSample = {
   legs: { home: string; away: string; pick: string; odds: number }[];
 };
 
-/** Football elite + cross-sport moneyline favourites */
 export const QUALITY_PICK_CODES = [
   "O05",
   "DC1X",
@@ -56,11 +62,42 @@ export const QUALITY_PICK_CODES = [
   "2",
 ] as const;
 
-const MIN_LEG_ODDS = 1.1;
-const MAX_LEG_ODDS = 1.55; // singles-only band — short prices
-const MIN_LEG_SCORE = 1.35;
-const MIN_FAV_EDGE = 0.1; // stronger favourites only
-const MIN_IMPLIED = 0.68; // ~odds ≤ 1.47
+type ModeLimits = {
+  minOdds: number;
+  maxOdds: number;
+  minImplied: number;
+  minFavEdge: number;
+  minScore: number;
+  allowDoubles: boolean;
+  maxDoubleOdds: number;
+  tennisMax: number;
+  hockeyMax: number;
+};
+
+const LIMITS: Record<SureMode, ModeLimits> = {
+  safe: {
+    minOdds: 1.1,
+    maxOdds: 1.45,
+    minImplied: 0.7,
+    minFavEdge: 0.1,
+    minScore: 1.35,
+    allowDoubles: false,
+    maxDoubleOdds: 0,
+    tennisMax: 1.32,
+    hockeyMax: 1.4,
+  },
+  boost: {
+    minOdds: 1.35,
+    maxOdds: 2.15,
+    minImplied: 0.48,
+    minFavEdge: 0.07,
+    minScore: 1.15,
+    allowDoubles: true,
+    maxDoubleOdds: 3.6,
+    tennisMax: 1.75,
+    hockeyMax: 1.95,
+  },
+};
 
 type AnalyzedLeg = BookableLeg & {
   score: number;
@@ -81,15 +118,18 @@ function deVig1x2(ev: SbEvent): { home: number; draw: number; away: number } | n
   return { home: ih / s, draw: id / s, away: ia / s };
 }
 
-function moneylineFav(ev: SbEvent): { side: "home" | "away"; odds: number; code: string } | null {
+function moneylineFav(
+  ev: SbEvent,
+  lim: ModeLimits,
+): { side: "home" | "away"; odds: number; code: string } | null {
   const sport = ev.sport || "football";
   if (sport === "basketball") {
     const h = ev.outcomes.BBH;
     const a = ev.outcomes.BBA;
     if (!h || !a) return null;
-    if (h <= a && h <= MAX_LEG_ODDS && h >= MIN_LEG_ODDS)
+    if (h <= a && h <= lim.maxOdds && h >= lim.minOdds)
       return { side: "home", odds: h, code: "BBH" };
-    if (a < h && a <= MAX_LEG_ODDS && a >= MIN_LEG_ODDS)
+    if (a < h && a <= lim.maxOdds && a >= lim.minOdds)
       return { side: "away", odds: a, code: "BBA" };
     return null;
   }
@@ -97,21 +137,18 @@ function moneylineFav(ev: SbEvent): { side: "home" | "away"; odds: number; code:
     const h = ev.outcomes.TNH;
     const a = ev.outcomes.TNA;
     if (!h || !a) return null;
-    // Tennis: only heavy favourites
-    if (h <= a && h <= 1.35 && h >= MIN_LEG_ODDS)
-      return { side: "home", odds: h, code: "TNH" };
-    if (a < h && a <= 1.35 && a >= MIN_LEG_ODDS)
-      return { side: "away", odds: a, code: "TNA" };
+    const cap = lim.tennisMax;
+    if (h <= a && h <= cap && h >= lim.minOdds) return { side: "home", odds: h, code: "TNH" };
+    if (a < h && a <= cap && a >= lim.minOdds) return { side: "away", odds: a, code: "TNA" };
     return null;
   }
   if (sport === "hockey" || sport === "baseball") {
     const h = ev.outcomes["1"];
     const a = ev.outcomes["2"];
     if (!h || !a) return null;
-    if (h <= a && h <= 1.45 && h >= MIN_LEG_ODDS)
-      return { side: "home", odds: h, code: "1" };
-    if (a < h && a <= 1.45 && a >= MIN_LEG_ODDS)
-      return { side: "away", odds: a, code: "2" };
+    const cap = lim.hockeyMax;
+    if (h <= a && h <= cap && h >= lim.minOdds) return { side: "home", odds: h, code: "1" };
+    if (a < h && a <= cap && a >= lim.minOdds) return { side: "away", odds: a, code: "2" };
     return null;
   }
   return null;
@@ -121,33 +158,39 @@ function analyzeFootballPick(
   ev: SbEvent,
   pickCode: string,
   snap: LearningSnapshot,
+  lim: ModeLimits,
+  mode: SureMode,
 ): AnalyzedLeg | null {
   const meta = PICKS[pickCode];
   if (!meta) return null;
   const odds = ev.outcomes[pickCode];
-  if (!odds || odds < MIN_LEG_ODDS || odds > MAX_LEG_ODDS) return null;
-  if (impliedProb(odds) < MIN_IMPLIED && pickCode !== "O05") return null;
+  if (!odds || odds < lim.minOdds || odds > lim.maxOdds) return null;
+  if (mode === "safe" && impliedProb(odds) < lim.minImplied && pickCode !== "O05") return null;
 
   const probs = deVig1x2(ev);
   const analysis: string[] = [];
   let favSide: "home" | "away" | "coin" = "coin";
 
   if (probs) {
-    if (probs.home - probs.away >= MIN_FAV_EDGE) favSide = "home";
-    else if (probs.away - probs.home >= MIN_FAV_EDGE) favSide = "away";
+    if (probs.home - probs.away >= lim.minFavEdge) favSide = "home";
+    else if (probs.away - probs.home >= lim.minFavEdge) favSide = "away";
     analysis.push(
-      `1X2 de-vig H ${Math.round(probs.home * 100)}% / D ${Math.round(probs.draw * 100)}% / A ${Math.round(probs.away * 100)}%`,
+      `De-vig 1X2 → Home ${Math.round(probs.home * 100)}% · Draw ${Math.round(probs.draw * 100)}% · Away ${Math.round(probs.away * 100)}%`,
     );
 
     if (["DC1X", "DNBH", "HO05", "1"].includes(pickCode)) {
-      if (favSide !== "home" || probs.home < 0.48) return null;
+      if (favSide !== "home" || probs.home < (mode === "safe" ? 0.48 : 0.42)) return null;
+      analysis.push(`Home favourite edge ${(probs.home - probs.away).toFixed(2)}`);
     }
     if (["DCX2", "DNBA", "AO05", "2"].includes(pickCode)) {
-      if (favSide !== "away" || probs.away < 0.48) return null;
+      if (favSide !== "away" || probs.away < (mode === "safe" ? 0.48 : 0.42)) return null;
+      analysis.push(`Away favourite edge ${(probs.away - probs.home).toFixed(2)}`);
     }
-    if (pickCode === "O05" && odds > 1.28) return null;
+    if (pickCode === "O05" && mode === "safe" && odds > 1.28) return null;
     if (pickCode === "O15") {
-      if (odds > 1.4 || probs.draw > 0.33) return null;
+      if (mode === "safe" && (odds > 1.4 || probs.draw > 0.33)) return null;
+      if (mode === "boost" && odds > 1.85) return null;
+      analysis.push("Goals market aligned with match tempo");
     }
     if (favSide === "coin" && !["O05", "O15"].includes(pickCode)) return null;
   } else if (!["O05", "O15"].includes(pickCode)) {
@@ -172,42 +215,46 @@ function analyzeFootballPick(
   };
 
   const pickStat = snap.byPick.find((p) => p.pickCode === pickCode);
-  if (pickStat && pickStat.plays >= 20 && pickStat.winRate < 0.55) return null;
+  if (pickStat && pickStat.plays >= 20 && pickStat.winRate < (mode === "safe" ? 0.55 : 0.48)) {
+    return null;
+  }
 
   let score = scoreLeg(leg, snap);
   if (pickCode === "O05") score += 0.55;
   if (odds <= 1.25) score += 0.5;
-  else if (odds <= 1.35) score += 0.25;
+  else if (odds <= 1.45) score += 0.2;
+  if (mode === "boost" && odds >= 1.55 && odds <= 1.95) score += 0.25; // sweet value band
   if (probs && favSide === "home") score += probs.home * 0.9;
   if (probs && favSide === "away") score += probs.away * 0.9;
-  if (score < MIN_LEG_SCORE) return null;
+  if (score < lim.minScore) return null;
 
-  analysis.push(`Football · ${pickCode} @ ${odds.toFixed(2)}`);
+  analysis.push(`Market ${pickCode} @ ${odds.toFixed(2)} (~${Math.round(leg.implied * 100)}% implied)`);
   if (pickStat && pickStat.plays >= 8) {
-    analysis.push(`History ${Math.round(pickStat.winRate * 100)}% of ${pickStat.plays}`);
+    analysis.push(
+      `Settled history: ${Math.round(pickStat.winRate * 100)}% wins across ${pickStat.plays} similar legs`,
+    );
   }
+  if (ev.league) analysis.push(`Competition: ${ev.league}`);
 
   return { ...leg, score, analysis, favSide };
 }
 
-function analyzeMoneyline(ev: SbEvent, snap: LearningSnapshot): AnalyzedLeg | null {
-  const fav = moneylineFav(ev);
+function analyzeMoneyline(
+  ev: SbEvent,
+  snap: LearningSnapshot,
+  lim: ModeLimits,
+  mode: SureMode,
+): AnalyzedLeg | null {
+  const fav = moneylineFav(ev, lim);
   if (!fav) return null;
   const meta = PICKS[fav.code];
   if (!meta) return null;
 
-  const edge =
+  const other =
     fav.side === "home"
-      ? 1 / fav.odds - 1 / (ev.outcomes.BBA || ev.outcomes.TNA || ev.outcomes["2"] || 3)
-      : 1 / fav.odds - 1 / (ev.outcomes.BBH || ev.outcomes.TNH || ev.outcomes["1"] || 3);
-  if (edge < 0.08 && (ev.sport === "basketball" || ev.sport === "tennis")) {
-    // require clear price gap
-    const other =
-      fav.side === "home"
-        ? ev.outcomes.BBA || ev.outcomes.TNA || ev.outcomes["2"]
-        : ev.outcomes.BBH || ev.outcomes.TNH || ev.outcomes["1"];
-    if (!other || other / fav.odds < 1.15) return null;
-  }
+      ? ev.outcomes.BBA || ev.outcomes.TNA || ev.outcomes["2"]
+      : ev.outcomes.BBH || ev.outcomes.TNH || ev.outcomes["1"];
+  if (other && other / fav.odds < (mode === "safe" ? 1.15 : 1.08)) return null;
 
   const leg: BookableLeg = {
     eventId: ev.eventId,
@@ -228,22 +275,29 @@ function analyzeMoneyline(ev: SbEvent, snap: LearningSnapshot): AnalyzedLeg | nu
 
   let score = scoreLeg(leg, snap) + impliedProb(fav.odds) * 1.2;
   if (fav.odds <= 1.25) score += 0.55;
-  if (ev.sport === "tennis" && fav.odds <= 1.22) score += 0.35;
-  if (score < MIN_LEG_SCORE) return null;
+  if (mode === "boost" && fav.odds >= 1.5) score += 0.2;
+  if (score < lim.minScore) return null;
 
   return {
     ...leg,
     score,
     analysis: [
-      `${ev.sportLabel || ev.sport} favourite`,
-      `@${fav.odds.toFixed(2)} (~${Math.round(leg.implied * 100)}%)`,
-      "Singles-only max-hit mode",
+      `${ev.sportLabel || ev.sport} moneyline favourite`,
+      `Price ${fav.odds.toFixed(2)} (~${Math.round(leg.implied * 100)}% implied)`,
+      other ? `Opponent price ${Number(other).toFixed(2)}` : "Clear market favourite",
+      mode === "safe" ? "Safe-mode short price" : "Boost-mode larger but still favoured",
+      ev.league ? `League: ${ev.league}` : "Open market",
     ],
     favSide: fav.side,
   };
 }
 
-function buildPool(fixtures: SbEvent[], snap: LearningSnapshot): AnalyzedLeg[] {
+function buildPool(
+  fixtures: SbEvent[],
+  snap: LearningSnapshot,
+  mode: SureMode,
+): AnalyzedLeg[] {
+  const lim = LIMITS[mode];
   const all: AnalyzedLeg[] = [];
 
   for (const ev of fixtures) {
@@ -259,11 +313,11 @@ function buildPool(fixtures: SbEvent[], snap: LearningSnapshot): AnalyzedLeg[] {
         "DNBH",
         "DNBA",
       ] as const) {
-        const a = analyzeFootballPick(ev, code, snap);
+        const a = analyzeFootballPick(ev, code, snap, lim, mode);
         if (a) all.push(a);
       }
     } else {
-      const a = analyzeMoneyline(ev, snap);
+      const a = analyzeMoneyline(ev, snap, lim, mode);
       if (a) all.push(a);
     }
   }
@@ -281,7 +335,7 @@ function buildPool(fixtures: SbEvent[], snap: LearningSnapshot): AnalyzedLeg[] {
     if (best.pickCode !== leg.pickCode) continue;
 
     const sp = leg.sport || "football";
-    if ((sportCount.get(sp) ?? 0) >= 2) continue; // diversify sports
+    if ((sportCount.get(sp) ?? 0) >= (mode === "boost" ? 3 : 2)) continue;
     const lg = leg.league || "unknown";
     if ((leagueCount.get(lg) ?? 0) >= 2) continue;
 
@@ -289,7 +343,7 @@ function buildPool(fixtures: SbEvent[], snap: LearningSnapshot): AnalyzedLeg[] {
     sportCount.set(sp, (sportCount.get(sp) ?? 0) + 1);
     leagueCount.set(lg, (leagueCount.get(lg) ?? 0) + 1);
     pool.push(leg);
-    if (pool.length >= 12) break;
+    if (pool.length >= 14) break;
   }
   return pool;
 }
@@ -299,28 +353,39 @@ async function explainSlip(
   totalOdds: number,
   conf: number,
   snap: LearningSnapshot,
+  mode: SureMode,
 ): Promise<string> {
   const analysisBlock = legs
     .map(
       (l) =>
-        `[${l.sportLabel || l.sport || "Sport"}] ${l.home} vs ${l.away} → ${l.pickLabel} @ ${l.odds.toFixed(2)} | ${l.analysis.join("; ")}`,
+        `[${l.sportLabel || l.sport || "Sport"}] ${l.home} vs ${l.away}\n` +
+        `  Pick: ${l.pickLabel} @ ${l.odds.toFixed(2)}\n` +
+        `  Score: ${l.score.toFixed(2)}\n` +
+        `  Signals: ${l.analysis.join(" · ")}`,
     )
     .join("\n");
 
+  const modeLabel =
+    mode === "safe"
+      ? "SAFE mode (short-odds single, maximize hit rate)"
+      : "BOOST mode (larger odds, still favourite-backed)";
+
   const text = await chatPlain({
     system:
-      "You are a multi-sport betting analyst. Explain why this SINGLE max-hit pick was chosen. Mention the sport. Never guarantee. 2–3 short sentences.",
-    user: `Max-hit SureCode single. Odds ${totalOdds.toFixed(2)}, model ~${Math.round(conf * 100)}%.\nTips: ${snap.advice.join(" | ")}\n${analysisBlock}`,
-    temperature: 0.25,
-    maxTokens: 200,
+      "You are a senior multi-sport betting analyst. Write a richer SureCode analysis: (1) why this market, (2) key probability/favourite signal, (3) risk note. 4–5 short sentences max. Never claim a guarantee. Mention the sport and mode.",
+    user: `${modeLabel}\nCombined odds ${totalOdds.toFixed(2)} · model confidence ~${Math.round(conf * 100)}%.\nLearning bank tips: ${snap.advice.slice(0, 4).join(" | ") || "warming up"}\n\nFull signals:\n${analysisBlock}`,
+    temperature: 0.3,
+    maxTokens: 320,
   });
 
-  if (text) return text;
+  if (text) return `[${mode.toUpperCase()}] ${text}`;
+
   const l = legs[0];
   return (
-    `Max-hit ${l?.sportLabel || "sport"} single after full analysis. ` +
-    `${l?.home} vs ${l?.away}: ${l?.pickLabel} @ ${totalOdds.toFixed(2)} ` +
-    `(~${Math.round(conf * 100)}% model). Singles-only — past doubles underperformed. Not a guarantee.`
+    `[${mode.toUpperCase()}] ${mode === "safe" ? "Safe single" : "Boost slip"} — ` +
+    `${l?.sportLabel || "sport"}: ${legs.map((x) => `${x.home}/${x.away} ${x.pickLabel}`).join(" · ")}. ` +
+    `Odds ~${totalOdds.toFixed(2)} · model ~${Math.round(conf * 100)}%. ` +
+    `${l?.analysis?.slice(0, 2).join(". ") || "Full market screen passed"}. Not a guarantee.`
   );
 }
 
@@ -328,16 +393,22 @@ async function bookSlip(
   slot: number,
   legs: AnalyzedLeg[],
   snap: LearningSnapshot,
+  mode: SureMode,
 ): Promise<SureSlip | null> {
-  if (legs.length !== 1) return null; // SINGLES ONLY
-  const totalOdds = legs[0].odds;
-  const confidence = legs[0].implied;
-  if (confidence < MIN_IMPLIED && legs[0].pickCode !== "O05") return null;
+  if (!legs.length) return null;
+  const lim = LIMITS[mode];
+  if (legs.length > 1 && !lim.allowDoubles) return null;
+  const totalOdds = legs.reduce((a, l) => a * l.odds, 1);
+  if (legs.length >= 2 && totalOdds > lim.maxDoubleOdds) return null;
+  const confidence = legs.reduce((a, l) => a * l.implied, 1);
+  if (mode === "safe" && confidence < lim.minImplied && legs[0].pickCode !== "O05") return null;
+  if (mode === "boost" && legs.length >= 2 && confidence < 0.28) return null;
 
-  const rationale = await explainSlip(legs, totalOdds, confidence, snap);
+  const rationale = await explainSlip(legs, totalOdds, confidence, snap, mode);
   const booked = await createBookingCode(legs);
   return {
     slot,
+    mode,
     legs,
     totalOdds,
     confidence,
@@ -348,13 +419,61 @@ async function bookSlip(
   };
 }
 
+async function buildModeSlips(
+  mode: SureMode,
+  fixtures: SbEvent[],
+  snap: LearningSnapshot,
+  count: number,
+  excludeEvents: Set<string>,
+): Promise<SureSlip[]> {
+  const lim = LIMITS[mode];
+  const pool = buildPool(
+    fixtures.filter((e) => !excludeEvents.has(e.eventId)),
+    snap,
+    mode,
+  );
+  const slots = slotsForMode(mode);
+  const slips: SureSlip[] = [];
+  const used = new Set<string>(excludeEvents);
+
+  let cursor = 0;
+  for (let i = 0; i < count && slips.length < count; i++) {
+    const slot = slots[slips.length] ?? slots[slots.length - 1]! + slips.length;
+
+    if (mode === "boost" && lim.allowDoubles && slips.length === count - 1 && pool.length - cursor >= 2) {
+      // last boost slip can be a 2-fold if prices fit
+      const pair: AnalyzedLeg[] = [];
+      for (let j = cursor; j < pool.length && pair.length < 2; j++) {
+        if (used.has(pool[j].eventId)) continue;
+        pair.push(pool[j]);
+      }
+      if (pair.length === 2 && pair[0].odds * pair[1].odds <= lim.maxDoubleOdds) {
+        used.add(pair[0].eventId);
+        used.add(pair[1].eventId);
+        const slip = await bookSlip(slot, pair, snap, mode);
+        if (slip?.code) slips.push(slip);
+        continue;
+      }
+    }
+
+    while (cursor < pool.length && used.has(pool[cursor].eventId)) cursor++;
+    if (cursor >= pool.length) break;
+    const leg = pool[cursor++];
+    used.add(leg.eventId);
+    const slip = await bookSlip(slot, [leg], snap, mode);
+    if (slip?.code) slips.push(slip);
+  }
+
+  return slips;
+}
+
 /**
- * Build up to N max-hit singles across all SportyBet sports.
+ * Build safe (slots 1–3) + boost (slots 4–6) Sure slips.
  */
 export async function buildSureSlipsOfDay(
   count = 3,
   _history: PastOutcomeSample[] = [],
-  opts: { allowAi?: boolean; legHistory?: LegHistoryRow[] } = {},
+  opts: { allowAi?: boolean; legHistory?: LegHistoryRow[]; modes?: SureMode[] } = {},
 ): Promise<SureSlip[]> {
   const now = Date.now();
   const fixtures = (await getAllSportyFixtures({ maxPagesPerSport: 3 })).filter(
@@ -362,13 +481,16 @@ export async function buildSureSlipsOfDay(
   );
 
   const snap = buildLearningSnapshot(opts.legHistory ?? []);
-  const pool = buildPool(fixtures, snap);
-  if (!pool.length) return [];
-
+  const modes = opts.modes ?? (["safe", "boost"] as SureMode[]);
   const slips: SureSlip[] = [];
-  for (let i = 0; i < Math.min(count, pool.length); i++) {
-    const slip = await bookSlip(i + 1, [pool[i]], snap);
-    if (slip?.code) slips.push(slip);
+  const used = new Set<string>();
+
+  for (const mode of modes) {
+    const built = await buildModeSlips(mode, fixtures, snap, count, used);
+    for (const s of built) {
+      for (const l of s.legs) used.add(l.eventId);
+      slips.push(s);
+    }
   }
 
   void opts.allowAi;

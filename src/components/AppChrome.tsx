@@ -9,11 +9,9 @@ const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
   { href: "/home", label: "Sure codes", icon: "shield" },
   { href: "/builder", label: "Build combos", icon: "layers" },
   { href: "/edit", label: "Edit long codes", icon: "layers" },
-  { href: "/picks", label: "Overall picks", icon: "target" },
+  { href: "/picks", label: "Picks & analysis", icon: "target" },
   { href: "/codes", label: "Plenty codes", icon: "dashboard" },
   { href: "/predictions", label: "Predictions", icon: "calendar" },
-  { href: "/analysis", label: "AI analysis", icon: "pulse" },
-  { href: "/combos", label: "Value combos", icon: "layers" },
   { href: "/saved", label: "Saved codes", icon: "bookmark" },
   { href: "/demo", label: "Demo wallet", icon: "wallet", flag: "FREE" },
   { href: "/leaderboard", label: "Leaderboard", icon: "trophy", flag: "FREE" },
@@ -23,7 +21,7 @@ const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
     title: "Sure codes of the day",
-    subtitle: "Max-hit singles · all SportyBet sports · full AI analysis",
+    subtitle: "Safe singles or larger sure — your choice · full AI analysis",
   },
   "/builder": {
     title: "Build your combos",
@@ -34,8 +32,8 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Paste a long SportyBet code → shorter high-probability rebuilds",
   },
   "/picks": {
-    title: "Overall picks",
-    subtitle: "Expert + value merged — one board for the day’s best legs",
+    title: "Picks & analysis",
+    subtitle: "Overall · value · combos · AI analysis — one intelligence hub",
   },
   "/codes": {
     title: "Plenty of codes",
@@ -46,20 +44,20 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Tip-style favourites from live odds — select and book a code",
   },
   "/expert": {
-    title: "Overall picks",
-    subtitle: "Redirected — expert + value live on Overall picks",
+    title: "Picks & analysis",
+    subtitle: "Merged into the intelligence hub",
   },
   "/value": {
-    title: "Overall picks",
-    subtitle: "Redirected — expert + value live on Overall picks",
+    title: "Picks & analysis",
+    subtitle: "Merged into the intelligence hub",
   },
   "/analysis": {
-    title: "AI match analysis",
-    subtitle: "De-vigged probabilities with Over 2.5 / BTTS context",
+    title: "Picks & analysis",
+    subtitle: "Merged into the intelligence hub",
   },
   "/combos": {
-    title: "Value combos",
-    subtitle: "Ready-made accumulators — book one in a click",
+    title: "Picks & analysis",
+    subtitle: "Merged into the intelligence hub",
   },
   "/saved": {
     title: "Saved codes",
