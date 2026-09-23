@@ -77,25 +77,26 @@ type ModeLimits = {
 const LIMITS: Record<SureMode, ModeLimits> = {
   safe: {
     minOdds: 1.1,
-    maxOdds: 1.45,
-    minImplied: 0.7,
+    maxOdds: 1.42,
+    minImplied: 0.72,
     minFavEdge: 0.1,
     minScore: 1.35,
     allowDoubles: false,
     maxDoubleOdds: 0,
-    tennisMax: 1.32,
-    hockeyMax: 1.4,
+    tennisMax: 1.3,
+    hockeyMax: 1.38,
   },
   boost: {
-    minOdds: 1.35,
-    maxOdds: 2.15,
-    minImplied: 0.48,
-    minFavEdge: 0.07,
-    minScore: 1.15,
+    // Clearly separated from safe — no tiny prices here
+    minOdds: 1.55,
+    maxOdds: 2.45,
+    minImplied: 0.4,
+    minFavEdge: 0.06,
+    minScore: 1.05,
     allowDoubles: true,
-    maxDoubleOdds: 3.6,
-    tennisMax: 1.75,
-    hockeyMax: 1.95,
+    maxDoubleOdds: 4.2,
+    tennisMax: 1.9,
+    hockeyMax: 2.15,
   },
 };
 
@@ -187,12 +188,28 @@ function analyzeFootballPick(
       analysis.push(`Away favourite edge ${(probs.away - probs.home).toFixed(2)}`);
     }
     if (pickCode === "O05" && mode === "safe" && odds > 1.28) return null;
+    if (pickCode === "O05" && mode === "boost") return null; // tiny O05 stays in safe only
     if (pickCode === "O15") {
       if (mode === "safe" && (odds > 1.4 || probs.draw > 0.33)) return null;
-      if (mode === "boost" && odds > 1.85) return null;
+      if (mode === "boost" && odds > 2.2) return null;
       analysis.push("Goals market aligned with match tempo");
     }
-    if (favSide === "coin" && !["O05", "O15"].includes(pickCode)) return null;
+    if (pickCode === "O25") {
+      if (mode !== "boost") return null;
+      if (probs.draw > 0.3) return null;
+      analysis.push("Over 2.5 — open game profile for boost");
+    }
+    if (pickCode === "BTTSY") {
+      if (mode !== "boost") return null;
+      if (probs.draw > 0.34) return null;
+      analysis.push("BTTS Yes — both sides expected to score");
+    }
+    if (
+      favSide === "coin" &&
+      !["O05", "O15", "O25", "BTTSY"].includes(pickCode)
+    ) {
+      return null;
+    }
   } else if (!["O05", "O15"].includes(pickCode)) {
     return null;
   }
@@ -221,9 +238,15 @@ function analyzeFootballPick(
 
   let score = scoreLeg(leg, snap);
   if (pickCode === "O05") score += 0.55;
-  if (odds <= 1.25) score += 0.5;
-  else if (odds <= 1.45) score += 0.2;
-  if (mode === "boost" && odds >= 1.55 && odds <= 1.95) score += 0.25; // sweet value band
+  if (mode === "safe") {
+    if (odds <= 1.25) score += 0.5;
+    else if (odds <= 1.4) score += 0.2;
+  } else {
+    // Boost: reward larger (but still reasonable) prices
+    if (odds >= 1.65 && odds <= 2.1) score += 0.55;
+    else if (odds >= 1.55) score += 0.3;
+    score += Math.min(0.45, (odds - 1.55) * 0.5);
+  }
   if (probs && favSide === "home") score += probs.home * 0.9;
   if (probs && favSide === "away") score += probs.away * 0.9;
   if (score < lim.minScore) return null;
@@ -303,16 +326,11 @@ function buildPool(
   for (const ev of fixtures) {
     const sport = (ev.sport || "football") as SportKey;
     if (sport === "football") {
-      for (const code of [
-        "O05",
-        "DC1X",
-        "DCX2",
-        "O15",
-        "HO05",
-        "AO05",
-        "DNBH",
-        "DNBA",
-      ] as const) {
+      const codes =
+        mode === "boost"
+          ? (["DC1X", "DCX2", "O15", "O25", "DNBH", "DNBA", "BTTSY", "1", "2"] as const)
+          : (["O05", "DC1X", "DCX2", "O15", "HO05", "AO05", "DNBH", "DNBA"] as const);
+      for (const code of codes) {
         const a = analyzeFootballPick(ev, code, snap, lim, mode);
         if (a) all.push(a);
       }
@@ -322,7 +340,15 @@ function buildPool(
     }
   }
 
-  all.sort((a, b) => b.score - a.score);
+  all.sort((a, b) => {
+    if (mode === "boost") {
+      // Prefer higher prices first among strong scores
+      const sa = a.score + a.odds * 0.55;
+      const sb = b.score + b.odds * 0.55;
+      return sb - sa;
+    }
+    return b.score - a.score;
+  });
 
   const pool: AnalyzedLeg[] = [];
   const usedEvents = new Set<string>();
@@ -440,19 +466,25 @@ async function buildModeSlips(
   for (let i = 0; i < count && slips.length < count; i++) {
     const slot = slots[slips.length] ?? slots[slots.length - 1]! + slips.length;
 
-    if (mode === "boost" && lim.allowDoubles && slips.length === count - 1 && pool.length - cursor >= 2) {
-      // last boost slip can be a 2-fold if prices fit
+    if (mode === "boost" && lim.allowDoubles && slips.length >= 1 && slips.length === count - 1) {
+      // Prefer a 2-fold for the last boost slip when two solid larger legs exist
       const pair: AnalyzedLeg[] = [];
       for (let j = cursor; j < pool.length && pair.length < 2; j++) {
         if (used.has(pool[j].eventId)) continue;
+        if (pool[j].odds < 1.55) continue;
         pair.push(pool[j]);
       }
-      if (pair.length === 2 && pair[0].odds * pair[1].odds <= lim.maxDoubleOdds) {
-        used.add(pair[0].eventId);
-        used.add(pair[1].eventId);
-        const slip = await bookSlip(slot, pair, snap, mode);
-        if (slip?.code) slips.push(slip);
-        continue;
+      if (pair.length === 2) {
+        const combo = pair[0].odds * pair[1].odds;
+        if (combo >= 2.4 && combo <= lim.maxDoubleOdds) {
+          used.add(pair[0].eventId);
+          used.add(pair[1].eventId);
+          const slip = await bookSlip(slot, pair, snap, mode);
+          if (slip?.code) {
+            slips.push(slip);
+            continue;
+          }
+        }
       }
     }
 

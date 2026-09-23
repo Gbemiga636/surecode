@@ -54,21 +54,33 @@ export function SureHomeClient({
   const [mode, setMode] = useState<SureModeChoice>("safe");
 
   const filtered = useMemo(() => {
-    const rows = codes.filter((c) => modeForSlot(c.slot) === mode);
-    return rows.length ? rows : codes.filter((c) => modeForSlot(c.slot) === "safe");
+    return codes.filter((c) => modeForSlot(c.slot) === mode);
   }, [codes, mode]);
 
   const latest = filtered[0];
-  const emptyBoost = mode === "boost" && !codes.some((c) => modeForSlot(c.slot) === "boost");
+  const emptyBoost = mode === "boost" && filtered.length === 0;
+  const emptySafe = mode === "safe" && filtered.length === 0;
 
   return (
     <div className="sure-home">
       <SureModePicker initial="safe" onChange={setMode} />
 
       {emptyBoost && (
-        <p className="mb-4 text-sm text-[var(--muted)]">
-          Larger-sure codes appear after the next crawl. Showing safe singles for now.
-        </p>
+        <div className="sc-empty sc-rise mb-4">
+          <p className="font-display text-lg font-bold text-[var(--ink)]">Larger sure warming up</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-[var(--muted)]">
+            Big-odds sure codes (slots 4–6) are separate from Safe. They appear after the next crawl —
+            not the same short singles.
+          </p>
+        </div>
+      )}
+      {emptySafe && (
+        <div className="sc-empty sc-rise mb-4">
+          <p className="font-display text-lg font-bold text-[var(--ink)]">Safe singles warming up</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--muted)]">
+            Short-odds singles appear here after a crawl.
+          </p>
+        </div>
       )}
 
       {latest && (
@@ -110,7 +122,7 @@ export function SureHomeClient({
         </div>
       )}
 
-      {!filtered.length && (
+      {!filtered.length && !emptyBoost && !emptySafe && (
         <div className="sc-empty sc-rise">
           <p className="font-display text-lg font-bold text-[var(--ink)]">Arena warming up</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--muted)]">
