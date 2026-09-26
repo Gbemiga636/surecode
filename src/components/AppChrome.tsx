@@ -5,75 +5,77 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Icon, type IconName } from "./Icons";
 
-const MAIN: { href: string; label: string; icon: IconName; flag?: string }[] = [
-  { href: "/home", label: "Sure codes", icon: "shield" },
-  { href: "/builder", label: "Build combos", icon: "layers" },
-  { href: "/edit", label: "Edit long codes", icon: "layers" },
-  { href: "/picks", label: "Picks & analysis", icon: "target" },
-  { href: "/codes", label: "Plenty codes", icon: "dashboard" },
-  { href: "/predictions", label: "Predictions", icon: "calendar" },
-  { href: "/saved", label: "Saved codes", icon: "bookmark" },
-  { href: "/demo", label: "Demo wallet", icon: "wallet", flag: "FREE" },
-  { href: "/leaderboard", label: "Leaderboard", icon: "trophy", flag: "FREE" },
-  { href: "/past", label: "Past codes", icon: "chart" },
+const GROUPS: {
+  label: string;
+  items: { href: string; label: string; icon: IconName; flag?: string }[];
+}[] = [
+  {
+    label: "Codes",
+    items: [
+      { href: "/home", label: "Sure codes", icon: "shield" },
+      { href: "/builder", label: "Build combos", icon: "layers" },
+      { href: "/edit", label: "Edit long codes", icon: "layers" },
+      { href: "/codes", label: "Plenty codes", icon: "dashboard" },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { href: "/picks", label: "Picks & analysis", icon: "target" },
+      { href: "/predictions", label: "Predictions", icon: "calendar" },
+      { href: "/past", label: "Past codes", icon: "chart" },
+    ],
+  },
+  {
+    label: "Practice",
+    items: [
+      { href: "/demo", label: "Demo wallet", icon: "wallet", flag: "FREE" },
+      { href: "/leaderboard", label: "Leaderboard", icon: "trophy", flag: "FREE" },
+      { href: "/saved", label: "Saved", icon: "bookmark" },
+    ],
+  },
 ];
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
-    title: "Sure codes of the day",
-    subtitle: "Safe singles or larger sure — your choice · full AI analysis",
+    title: "Sure codes",
+    subtitle: "Trained Sure AI · Safe singles or Larger sure",
   },
   "/builder": {
-    title: "Build your combos",
-    subtitle: "Pick markets → AI ranks fixtures → SportyBet codes",
+    title: "Build combos",
+    subtitle: "Choose markets · we book the strongest codes",
   },
   "/edit": {
     title: "Edit long codes",
-    subtitle: "Paste a long SportyBet code → shorter high-probability rebuilds",
+    subtitle: "Trim weak legs · rebuild shorter slips",
   },
   "/picks": {
     title: "Picks & analysis",
-    subtitle: "Overall · value · combos · AI analysis — one intelligence hub",
+    subtitle: "Overall · value · combos · AI desk",
   },
   "/codes": {
     title: "Plenty of codes",
-    subtitle: "SAFE · VALUE · AI · COMBO slips published by the crawler",
+    subtitle: "SAFE · VALUE · AI · COMBO from the crawler",
   },
   "/predictions": {
-    title: "Match predictions",
-    subtitle: "Tip-style favourites from live odds — select and book a code",
-  },
-  "/expert": {
-    title: "Picks & analysis",
-    subtitle: "Merged into the intelligence hub",
-  },
-  "/value": {
-    title: "Picks & analysis",
-    subtitle: "Merged into the intelligence hub",
-  },
-  "/analysis": {
-    title: "Picks & analysis",
-    subtitle: "Merged into the intelligence hub",
-  },
-  "/combos": {
-    title: "Picks & analysis",
-    subtitle: "Merged into the intelligence hub",
+    title: "Predictions",
+    subtitle: "Favourite tips from live SportyBet prices",
   },
   "/saved": {
-    title: "Saved codes",
-    subtitle: "Preferences and every code this account has generated",
+    title: "Saved",
+    subtitle: "Your preferences and generated codes",
   },
   "/demo": {
-    title: "Demo bet simulator",
-    subtitle: "Virtual ₦ bank — practice slips with no real money",
+    title: "Demo wallet",
+    subtitle: "Virtual ₦ bank · no real money",
   },
   "/leaderboard": {
-    title: "Demo wallet leaderboard",
+    title: "Leaderboard",
     subtitle: "Ranked by virtual returns",
   },
   "/past": {
     title: "Past codes",
-    subtitle: "Full forever archive — filter by date · win/loss track record",
+    subtitle: "Archive with date filters",
   },
   "/how": {
     title: "How it works",
@@ -86,13 +88,11 @@ export function AppChrome({
   children,
 }: {
   email: string;
-  title?: string;
-  subtitle?: string;
   children: React.ReactNode;
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
-  const meta = TITLES[path] ?? { title: "SureCode", subtitle: "Live SportyBet intelligence" };
+  const meta = TITLES[path] ?? { title: "SureCode", subtitle: "SportyBet intelligence" };
 
   useEffect(() => {
     setOpen(false);
@@ -114,12 +114,10 @@ export function AppChrome({
       />
       <aside className={`sidebar ${open ? "open" : ""}`} id="sidebar">
         <div className="brand">
-          <span className="logo">
-            <Icon name="bolt" size={17} className="logo-ico" />
+          <span className="logo" aria-hidden>
+            SC
           </span>
-          <span className="brand-text">
-            SureCode <em>AI</em>
-          </span>
+          <span className="brand-text">SureCode</span>
           <button
             type="button"
             className="sidebar-close"
@@ -130,22 +128,26 @@ export function AppChrome({
           </button>
         </div>
 
-        <div className="nav-label">Main</div>
-        {MAIN.map((item) => {
-          const on = path === item.href || path.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`nav-item ${on ? "on" : ""}`}
-              aria-current={on ? "page" : undefined}
-            >
-              <Icon name={item.icon} />
-              <span className="nav-t">{item.label}</span>
-              {item.flag && <span className="nav-free">{item.flag}</span>}
-            </Link>
-          );
-        })}
+        {GROUPS.map((g) => (
+          <div key={g.label} className="nav-group">
+            <div className="nav-label">{g.label}</div>
+            {g.items.map((item) => {
+              const on = path === item.href || path.startsWith(item.href + "/");
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-item ${on ? "on" : ""}`}
+                  aria-current={on ? "page" : undefined}
+                >
+                  <Icon name={item.icon} />
+                  <span className="nav-t">{item.label}</span>
+                  {item.flag && <span className="nav-free">{item.flag}</span>}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
 
         <div className="nav-label">Help</div>
         <Link href="/how" className={`nav-item ${path === "/how" ? "on" : ""}`}>
@@ -167,9 +169,8 @@ export function AppChrome({
           </form>
           <p className="side-live">
             <span className="live-dot" />
-            Live · crawl every ~20 min
+            Markets refresh on crawl
           </p>
-          <p className="side-risk">18+ · Bet responsibly</p>
         </div>
       </aside>
 
@@ -182,7 +183,7 @@ export function AppChrome({
           <div className="top-right">
             <span className="chip chip-live">
               <span className="live-dot" />
-              SportyBet · NG
+              SportyBet NG
             </span>
             <button
               type="button"

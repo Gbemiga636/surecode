@@ -77,26 +77,25 @@ type ModeLimits = {
 const LIMITS: Record<SureMode, ModeLimits> = {
   safe: {
     minOdds: 1.1,
-    maxOdds: 1.42,
-    minImplied: 0.72,
-    minFavEdge: 0.1,
-    minScore: 1.35,
+    maxOdds: 1.38,
+    minImplied: 0.74,
+    minFavEdge: 0.12,
+    minScore: 1.55,
     allowDoubles: false,
     maxDoubleOdds: 0,
-    tennisMax: 1.3,
-    hockeyMax: 1.38,
+    tennisMax: 1.25,
+    hockeyMax: 1.32,
   },
   boost: {
-    // Clearly separated from safe — no tiny prices here
     minOdds: 1.55,
-    maxOdds: 2.45,
-    minImplied: 0.4,
-    minFavEdge: 0.06,
-    minScore: 1.05,
+    maxOdds: 2.35,
+    minImplied: 0.42,
+    minFavEdge: 0.07,
+    minScore: 1.2,
     allowDoubles: true,
-    maxDoubleOdds: 4.2,
-    tennisMax: 1.9,
-    hockeyMax: 2.15,
+    maxDoubleOdds: 3.8,
+    tennisMax: 1.85,
+    hockeyMax: 2.05,
   },
 };
 
@@ -232,7 +231,17 @@ function analyzeFootballPick(
   };
 
   const pickStat = snap.byPick.find((p) => p.pickCode === pickCode);
-  if (pickStat && pickStat.plays >= 20 && pickStat.winRate < (mode === "safe" ? 0.55 : 0.48)) {
+  if (snap.avoidMarkets.includes(pickCode) && mode === "safe") return null;
+  if (
+    mode === "safe" &&
+    snap.eliteMarkets.length >= 2 &&
+    !snap.eliteMarkets.includes(pickCode) &&
+    !["O05", "DC1X", "DCX2", "HO05", "AO05"].includes(pickCode)
+  ) {
+    // When training is mature, stick to elite + core high-hit markets
+    return null;
+  }
+  if (pickStat && pickStat.plays >= 12 && pickStat.smoothed < (mode === "safe" ? 0.58 : 0.5)) {
     return null;
   }
 
@@ -252,12 +261,14 @@ function analyzeFootballPick(
   if (score < lim.minScore) return null;
 
   analysis.push(`Market ${pickCode} @ ${odds.toFixed(2)} (~${Math.round(leg.implied * 100)}% implied)`);
-  if (pickStat && pickStat.plays >= 8) {
+  if (pickStat && pickStat.plays >= 6) {
     analysis.push(
-      `Settled history: ${Math.round(pickStat.winRate * 100)}% wins across ${pickStat.plays} similar legs`,
+      `Trained ${pickCode}: ~${Math.round(pickStat.smoothed * 100)}% smoothed (${pickStat.plays} settled)`,
     );
   }
-  if (ev.league) analysis.push(`Competition: ${ev.league}`);
+  if (snap.eliteMarkets.includes(pickCode)) {
+    analysis.push("Category ranked elite by Sure AI training");
+  }
 
   return { ...leg, score, analysis, favSide };
 }
@@ -398,10 +409,10 @@ async function explainSlip(
 
   const text = await chatPlain({
     system:
-      "You are a senior multi-sport betting analyst. Write a richer SureCode analysis: (1) why this market, (2) key probability/favourite signal, (3) risk note. 4–5 short sentences max. Never claim a guarantee. Mention the sport and mode.",
-    user: `${modeLabel}\nCombined odds ${totalOdds.toFixed(2)} · model confidence ~${Math.round(conf * 100)}%.\nLearning bank tips: ${snap.advice.slice(0, 4).join(" | ") || "warming up"}\n\nFull signals:\n${analysisBlock}`,
-    temperature: 0.3,
-    maxTokens: 320,
+      "You are Sure AI, a senior multi-sport analyst for a betting intelligence product. Write a clear broadcast-style brief: (1) sport + market chosen, (2) favourite/probability signal from de-vig or price, (3) what history/training supports, (4) one risk caveat. 4–6 short sentences. No guarantees. No hype slang.",
+    user: `${modeLabel}\nCombined odds ${totalOdds.toFixed(2)} · model confidence ~${Math.round(conf * 100)}%.\nTraining: ${snap.advice.slice(0, 5).join(" | ") || "warming up"}\nElite markets: ${snap.eliteMarkets.join(", ") || "n/a"}\n\nSignals:\n${analysisBlock}`,
+    temperature: 0.28,
+    maxTokens: 360,
   });
 
   if (text) return `[${mode.toUpperCase()}] ${text}`;

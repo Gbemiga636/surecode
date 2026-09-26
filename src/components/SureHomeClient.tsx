@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { CodeActions } from "@/components/CodeActions";
 import { ReadMore } from "@/components/ReadMore";
-import { GoalBurst, SportChip } from "@/components/SureArena";
+import { SportChip } from "@/components/SureArena";
 import { SureModePicker, type SureModeChoice } from "@/components/SureModePicker";
 import { modeForSlot } from "@/lib/sure-mode";
 
@@ -87,8 +87,16 @@ export function SureHomeClient({
         <div className="hero-panel hero-sport sc-rise mb-6">
           <span className="hero-aurora" aria-hidden />
           <span className="hero-ring" aria-hidden />
-          <div className="hero-arena">
-            <GoalBurst />
+          <div className="hero-arena" aria-hidden>
+            <div className="hero-odds-stack">
+              <span>HIT</span>
+              <strong>
+                {latest.confidence != null
+                  ? `${Math.round(Number(latest.confidence) * 100)}`
+                  : "—"}
+              </strong>
+              <em>model %</em>
+            </div>
           </div>
           <div className="relative z-[2] p-6 pr-[200px] max-[900px]:pr-6 sm:p-8 sm:pr-[220px]">
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">

@@ -4,8 +4,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { SoccerBall, BgFx } from "@/components/PitchArt";
-import { Icon } from "@/components/Icons";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -21,15 +19,11 @@ export default function SignupPage() {
     setError(null);
     setInfo(null);
     const supabase = createClient();
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     const { data, error: err } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        emailRedirectTo:
-          typeof window !== "undefined"
-            ? `${window.location.origin}/auth/callback`
-            : undefined,
-      },
+      options: { emailRedirectTo: `${origin}/auth/callback` },
     });
     setLoading(false);
     if (err) {
@@ -45,62 +39,52 @@ export default function SignupPage() {
   }
 
   return (
-    <main className="relative grid min-h-dvh lg:grid-cols-2">
-      <BgFx />
-      <aside className="sc-auth-aside relative hidden overflow-hidden border-r border-[var(--line)] lg:flex lg:flex-col lg:justify-end lg:p-12">
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-90">
-          <SoccerBall />
-        </div>
-        <div className="relative z-10">
-          <p className="font-display text-4xl font-extrabold tracking-[-0.04em]">SureCode</p>
-          <p className="mt-3 max-w-sm leading-relaxed text-[var(--muted)]">
-            One account. Sure codes, predictions, expert slips, demo bank.
-          </p>
-        </div>
+    <main className="auth-shell">
+      <aside className="auth-aside">
+        <p className="auth-aside-brand">SureCode</p>
+        <p className="auth-aside-copy">
+          Sure AI trains on settled SportyBet legs so today’s codes lean toward hit rate — not hype.
+        </p>
       </aside>
-
-      <section className="relative z-10 flex flex-col justify-center px-6 py-14 sm:px-12">
-        <div className="mx-auto w-full max-w-md">
-          <Link href="/" className="inline-flex items-center gap-2 text-sm font-bold text-[var(--primary)]">
-            <Icon name="bolt" size={16} /> SureCode
-          </Link>
-          <h1 className="mt-5 font-display text-3xl font-extrabold tracking-tight">Create account</h1>
-          <p className="mt-2 text-[var(--muted)]">Start in under a minute.</p>
-          <form onSubmit={onSubmit} className="sc-card mt-8 space-y-4 p-6">
-            <label className="block text-sm font-semibold">
-              Email
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="sc-input"
-              />
-            </label>
-            <label className="block text-sm font-semibold">
-              Password
-              <input
-                type="password"
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="sc-input"
-              />
-            </label>
-            {error && <p className="text-sm text-[var(--bad)]">{error}</p>}
-            {info && <p className="text-sm text-[var(--primary)]">{info}</p>}
-            <button type="submit" disabled={loading} className="sc-btn w-full">
-              {loading ? "Creating…" : "Sign up"}
-            </button>
-          </form>
-          <p className="mt-5 text-sm text-[var(--muted)]">
-            Already have an account?{" "}
-            <Link href="/login" className="font-bold text-[var(--accent)]">
-              Log in
-            </Link>
-          </p>
-        </div>
+      <section className="auth-panel">
+        <Link href="/" className="auth-back">
+          ← Back
+        </Link>
+        <h1 className="auth-title">Create account</h1>
+        <p className="auth-sub">Start with Sure codes and a free demo wallet.</p>
+        <form onSubmit={onSubmit} className="auth-form">
+          <label>
+            Email
+            <input
+              className="sc-input"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Password
+            <input
+              className="sc-input"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={6}
+              required
+            />
+          </label>
+          {error && <p className="auth-error">{error}</p>}
+          {info && <p className="auth-info">{info}</p>}
+          <button type="submit" className="sc-btn" disabled={loading}>
+            {loading ? "Creating…" : "Get started"}
+          </button>
+        </form>
+        <p className="auth-alt">
+          Already have an account? <Link href="/login">Log in</Link>
+        </p>
       </section>
     </main>
   );

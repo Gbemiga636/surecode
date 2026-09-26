@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { SoccerBall, BgFx } from "@/components/PitchArt";
 
 const HERO =
   "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=2400&q=80";
@@ -14,48 +13,99 @@ export default async function LandingPage() {
   if (user) redirect("/home");
 
   return (
-    <main className="sc-hero-stage">
-      <BgFx />
-      <div className="sc-hero-img" style={{ backgroundImage: `url(${HERO})` }} aria-hidden />
-      <div className="sc-hero-veil" aria-hidden />
-
-      <div className="pointer-events-none absolute right-[6%] top-[18%] z-[2] hidden md:block">
-        <span
-          className="hero-ring"
-          style={{
-            right: "auto",
-            left: "50%",
-            top: "50%",
-            marginTop: 0,
-            transform: "translate(-50%, -50%)",
-          }}
-        />
-        <SoccerBall />
-      </div>
-
-      <div className="relative z-10 mx-auto flex min-h-dvh max-w-[72rem] flex-col justify-end px-6 pb-16 pt-10 sm:px-10 sm:pb-24">
-        <p className="font-display text-[clamp(3.4rem,12vw,7.5rem)] font-extrabold leading-[0.92] tracking-[-0.05em] text-[var(--ink)]">
-          SureCode
-        </p>
-        <h1 className="mt-5 max-w-lg font-display text-xl font-semibold leading-snug tracking-[-0.02em] text-[var(--ink)] sm:text-2xl">
-          Today’s SportyBet codes — refined, openable, ready.
-        </h1>
-        <p className="mt-3 max-w-md text-[0.95rem] leading-relaxed text-[var(--muted)] sm:text-base">
-          High-confidence slips with AI scouting, expert picks, and a demo wallet. Built to feel as
-          sharp as the brands you already trust.
-        </p>
-        <div className="mt-9 flex flex-wrap gap-3">
-          <Link href="/signup" className="sc-btn-flood">
-            Get started
+    <main className="lp">
+      <header className="lp-top">
+        <span className="lp-mark">SureCode</span>
+        <nav className="lp-top-nav" aria-label="Account">
+          <Link href="/how" className="lp-top-link">
+            How it works
           </Link>
-          <Link href="/login" className="sc-btn-ghost">
+          <Link href="/login" className="lp-top-link">
             Log in
           </Link>
+          <Link href="/signup" className="lp-cta-sm">
+            Get started
+          </Link>
+        </nav>
+      </header>
+
+      <section className="lp-hero" aria-label="SureCode">
+        <div
+          className="lp-hero-media"
+          style={{ backgroundImage: `url(${HERO})` }}
+          role="img"
+          aria-label="Football pitch under floodlights"
+        />
+        <div className="lp-hero-shade" aria-hidden />
+        <div className="lp-hero-copy">
+          <p className="lp-brand">SureCode</p>
+          <h1 className="lp-headline">SportyBet codes built for hit rate.</h1>
+          <p className="lp-lede">
+            Trained Sure AI scans live markets across sports, then books openable codes — Safe
+            singles or Larger sure, your call.
+          </p>
+          <div className="lp-actions">
+            <Link href="/signup" className="lp-btn-primary">
+              Open SureCode
+            </Link>
+            <Link href="/login" className="lp-btn-secondary">
+              I have an account
+            </Link>
+          </div>
         </div>
-        <p className="mt-12 text-xs font-medium tracking-wide text-[var(--muted)]">
-          18+ only · Not a guarantee · Bet responsibly
-        </p>
-      </div>
+      </section>
+
+      <section className="lp-strip" aria-label="What you get">
+        <div className="lp-strip-item">
+          <span className="lp-strip-k">01</span>
+          <h2>Sure codes</h2>
+          <p>Short singles or bigger favourite-backed slips — scored from live odds + settled history.</p>
+        </div>
+        <div className="lp-strip-item">
+          <span className="lp-strip-k">02</span>
+          <h2>Build & edit</h2>
+          <p>Pick markets like Over 0.5 or corners, or paste a long code and rebuild it shorter.</p>
+        </div>
+        <div className="lp-strip-item">
+          <span className="lp-strip-k">03</span>
+          <h2>Practice wallet</h2>
+          <p>Stake virtually, track results, and learn the board before you risk real money.</p>
+        </div>
+      </section>
+
+      <section className="lp-board">
+        <div className="lp-board-copy">
+          <p className="lp-eyebrow">Multi-sport desk</p>
+          <h2>Football, basketball, tennis, hockey, baseball — one Sure board.</h2>
+          <p>
+            The crawler ranks the day’s strongest prices, books SportyBet share codes, and attaches
+            a full analysis brief on every slip.
+          </p>
+          <Link href="/signup" className="lp-btn-primary">
+            Start free
+          </Link>
+        </div>
+        <aside className="lp-score" aria-hidden>
+          <div className="lp-score-row">
+            <span>SAFE</span>
+            <strong>1.22</strong>
+          </div>
+          <div className="lp-score-row muted">
+            <span>BOOST</span>
+            <strong>1.96</strong>
+          </div>
+          <div className="lp-score-row">
+            <span>SPORTS</span>
+            <strong>5</strong>
+          </div>
+          <p className="lp-score-note">Illustrative odds bands — not a live tip.</p>
+        </aside>
+      </section>
+
+      <footer className="lp-foot">
+        <span>SureCode</span>
+        <span>18+ only · Not a guarantee · Bet responsibly</span>
+      </footer>
     </main>
   );
 }
