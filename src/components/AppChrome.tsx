@@ -162,7 +162,7 @@ export function AppChrome({
               {email}
             </span>
           </div>
-          <form action="/auth/signout" method="post">
+          <form action="/auth/signout" method="post" className="side-signout-form">
             <button type="submit" className="signout-link">
               Sign out
             </button>
