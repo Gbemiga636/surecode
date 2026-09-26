@@ -1,8 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { SURECODE_SITE_URL } from "@/lib/gpt-auth";
 
 function siteOrigin(request: Request): string {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  const configured = (process.env.NEXT_PUBLIC_SITE_URL || SURECODE_SITE_URL).replace(
+    /\/$/,
+    "",
+  );
   if (configured) return configured;
   const proto = request.headers.get("x-forwarded-proto") ?? "https";
   const host =
