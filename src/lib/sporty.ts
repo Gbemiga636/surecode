@@ -18,7 +18,7 @@ export const SPORTY_SPORTS: {
   markets: string;
   pages: number;
 }[] = [
-  { key: "football", id: "sr:sport:1", label: "Football", markets: "1,10,11,18,19,20,29", pages: 5 },
+  { key: "football", id: "sr:sport:1", label: "Football", markets: "1,10,11,18,19,20,29,60,63,68,69,70", pages: 5 },
   { key: "basketball", id: "sr:sport:2", label: "Basketball", markets: "219,225", pages: 3 },
   { key: "tennis", id: "sr:sport:5", label: "Tennis", markets: "186", pages: 3 },
   { key: "hockey", id: "sr:sport:4", label: "Ice Hockey", markets: "1,10,18", pages: 2 },
@@ -90,6 +90,28 @@ export const PICKS: Record<
   BTTSN: { marketId: "29", specifier: "", outcomeId: "76", label: "Both Teams NOT To Score", market: "BTTS" },
   HO05: { marketId: "19", specifier: "total=0.5", outcomeId: "12", label: "Home Over 0.5 Goals", market: "Team Goals" },
   AO05: { marketId: "20", specifier: "total=0.5", outcomeId: "12", label: "Away Over 0.5 Goals", market: "Team Goals" },
+  // 1st-half high-hit lines
+  "1HO05": {
+    marketId: "68",
+    specifier: "total=0.5",
+    outcomeId: "12",
+    label: "1st Half Over 0.5 Goals",
+    market: "1st Half O/U",
+  },
+  "1HDC1X": {
+    marketId: "63",
+    specifier: "",
+    outcomeId: "9",
+    label: "1st Half Home or Draw",
+    market: "1st Half DC",
+  },
+  "1HDCX2": {
+    marketId: "63",
+    specifier: "",
+    outcomeId: "11",
+    label: "1st Half Draw or Away",
+    market: "1st Half DC",
+  },
   BBH: { marketId: "219", specifier: "", outcomeId: "4", label: "Home Win", market: "Winner" },
   BBA: { marketId: "219", specifier: "", outcomeId: "5", label: "Away Win", market: "Winner" },
   TNH: { marketId: "186", specifier: "", outcomeId: "4", label: "Home Win", market: "Winner" },
@@ -614,6 +636,12 @@ export function settlePick(pickCode: string, home: number, away: number): boolea
       return home > 0.5;
     case "AO05":
       return away > 0.5;
+    case "1HO05":
+      // Full-time score can't settle 1H alone — leave null (void/unsettled via score API)
+      return null;
+    case "1HDC1X":
+    case "1HDCX2":
+      return null;
     case "BBH":
     case "TNH":
       return home > away;

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export type SureModeChoice = "safe" | "boost";
+export type SureModeChoice = "safe" | "boost" | "longshot";
 
 const KEY = "surecode_sure_mode";
 
@@ -18,7 +18,7 @@ export function SureModePicker({
   useEffect(() => {
     try {
       const saved = localStorage.getItem(KEY) as SureModeChoice | null;
-      if (saved === "safe" || saved === "boost") {
+      if (saved === "safe" || saved === "boost" || saved === "longshot") {
         setMode(saved);
         onChange?.(saved);
       }
@@ -41,7 +41,7 @@ export function SureModePicker({
   return (
     <div className="sure-mode-picker sc-rise mb-5">
       <p className="mb-2 text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
-        Your Sure setting
+        Profit lane
       </p>
       <div className="flex flex-wrap gap-2">
         <button
@@ -49,16 +49,24 @@ export function SureModePicker({
           className={`sure-mode-btn ${mode === "safe" ? "active" : ""}`}
           onClick={() => choose("safe")}
         >
-          <span className="sure-mode-title">Safe singles</span>
-          <span className="sure-mode-desc">Small odds · highest hit chance</span>
+          <span className="sure-mode-title">Safe</span>
+          <span className="sure-mode-desc">Short odds · protect bankroll</span>
         </button>
         <button
           type="button"
           className={`sure-mode-btn ${mode === "boost" ? "active" : ""}`}
           onClick={() => choose("boost")}
         >
-          <span className="sure-mode-title">Larger sure</span>
-          <span className="sure-mode-desc">Bigger odds · still favourite-backed</span>
+          <span className="sure-mode-title">Larger</span>
+          <span className="sure-mode-desc">Bigger favourites · cross-sport</span>
+        </button>
+        <button
+          type="button"
+          className={`sure-mode-btn ${mode === "longshot" ? "active" : ""}`}
+          onClick={() => choose("longshot")}
+        >
+          <span className="sure-mode-title">Longshot</span>
+          <span className="sure-mode-desc">Multi-day · high odds stacks</span>
         </button>
       </div>
     </div>
@@ -69,7 +77,7 @@ export function readSureMode(): SureModeChoice {
   if (typeof window === "undefined") return "safe";
   try {
     const saved = localStorage.getItem(KEY) as SureModeChoice | null;
-    if (saved === "safe" || saved === "boost") return saved;
+    if (saved === "safe" || saved === "boost" || saved === "longshot") return saved;
   } catch {
     /* ignore */
   }

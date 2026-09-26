@@ -39,7 +39,7 @@ const GROUPS: {
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
     title: "Sure codes",
-    subtitle: "Trained Sure AI · Safe singles or Larger sure",
+    subtitle: "Safe · Larger · Longshot · cross-sport · AI play-out",
   },
   "/builder": {
     title: "Build combos",

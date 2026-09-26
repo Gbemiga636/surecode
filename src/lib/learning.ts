@@ -212,7 +212,8 @@ export function scoreLeg(leg: BookableLeg, snap: LearningSnapshot): number {
   else if (odds > 1.45 && odds <= 1.65) oddsFit = 0.85;
   else if (odds > 1.65 && odds <= 1.95) oddsFit = 0.55;
   else if (odds > 1.95 && odds <= 2.3) oddsFit = 0.35;
-  else oddsFit = 0.12;
+  else if (odds > 2.3 && odds <= 2.85) oddsFit = 0.28; // longshot-leg band
+  else oddsFit = 0.1;
 
   return winPrior * 3.1 + oddsFit * 1.4 + leg.implied * 1.15;
 }

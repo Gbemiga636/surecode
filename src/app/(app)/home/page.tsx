@@ -23,7 +23,7 @@ export default async function HomePage() {
       <PageHeader
         kicker="Max-hit · all sports"
         title="Sure codes"
-        subtitle={`${day} · Choose Safe singles or Larger sure — full AI analysis on every slip.`}
+        subtitle={`${day} · Safe · Larger · Longshot — cross-sport packs, AI play-out veto, profit-first.`}
       />
       <SureHomeClient day={day} codes={rows} />
     </div>

@@ -192,7 +192,7 @@ export async function runSureCrawl(): Promise<CrawlResult> {
       slips = await buildSureSlipsOfDay(3, history, {
         allowAi,
         legHistory,
-        modes: ["safe", "boost"],
+        modes: ["safe", "boost", "longshot"],
       });
 
       for (const slip of slips) {

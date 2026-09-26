@@ -5,7 +5,7 @@ import { CodeActions } from "@/components/CodeActions";
 import { ReadMore } from "@/components/ReadMore";
 import { SportChip } from "@/components/SureArena";
 import { SureModePicker, type SureModeChoice } from "@/components/SureModePicker";
-import { modeForSlot } from "@/lib/sure-mode";
+import { modeForSlot, modeLabel } from "@/lib/sure-mode";
 
 function sportyOpenUrl(code: string) {
   return `https://www.sportybet.com/ng/?shareCode=${encodeURIComponent(code)}`;
@@ -60,6 +60,7 @@ export function SureHomeClient({
   const latest = filtered[0];
   const emptyBoost = mode === "boost" && filtered.length === 0;
   const emptySafe = mode === "safe" && filtered.length === 0;
+  const emptyLong = mode === "longshot" && filtered.length === 0;
 
   return (
     <div className="sure-home">
@@ -69,8 +70,7 @@ export function SureHomeClient({
         <div className="sc-empty sc-rise mb-4">
           <p className="font-display text-lg font-bold text-[var(--ink)]">Larger sure warming up</p>
           <p className="mx-auto mt-2 max-w-md text-sm text-[var(--muted)]">
-            Big-odds sure codes (slots 4–6) are separate from Safe. They appear after the next crawl —
-            not the same short singles.
+            Bigger favourite-backed codes (slots 4–6) appear after the next crawl — separate from Safe.
           </p>
         </div>
       )}
@@ -78,7 +78,16 @@ export function SureHomeClient({
         <div className="sc-empty sc-rise mb-4">
           <p className="font-display text-lg font-bold text-[var(--ink)]">Safe singles warming up</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--muted)]">
-            Short-odds singles appear here after a crawl.
+            Short-odds bankroll protectors appear here after a crawl.
+          </p>
+        </div>
+      )}
+      {emptyLong && (
+        <div className="sc-empty sc-rise mb-4">
+          <p className="font-display text-lg font-bold text-[var(--ink)]">Longshots warming up</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-[var(--muted)]">
+            Multi-day cross-sport stacks (slots 7–9) with higher combined odds. AI play-out must clear
+            them first — they are never “certain”.
           </p>
         </div>
       )}
@@ -100,7 +109,7 @@ export function SureHomeClient({
           </div>
           <div className="relative z-[2] p-6 pr-[200px] max-[900px]:pr-6 sm:p-8 sm:pr-[220px]">
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
-              {mode === "safe" ? "Safe single" : "Larger sure"} · slip {latest.slot}
+              {modeLabel(mode)} · slip {latest.slot}
               {latest.confidence != null
                 ? ` · ~${Math.round(Number(latest.confidence) * 100)}% model`
                 : ""}
@@ -130,7 +139,7 @@ export function SureHomeClient({
         </div>
       )}
 
-      {!filtered.length && !emptyBoost && !emptySafe && (
+      {!filtered.length && !emptyBoost && !emptySafe && !emptyLong && (
         <div className="sc-empty sc-rise">
           <p className="font-display text-lg font-bold text-[var(--ink)]">Arena warming up</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--muted)]">
@@ -158,9 +167,7 @@ export function SureHomeClient({
                       {conf != null ? ` · ${conf}%` : ""}
                     </p>
                     <SportChip sport={leg0?.sportLabel || leg0?.sport} />
-                    <span className="sport-chip">
-                      {modeForSlot(c.slot) === "safe" ? "Safe" : "Boost"}
-                    </span>
+                    <span className="sport-chip">{modeLabel(modeForSlot(c.slot))}</span>
                   </div>
                   <p className="mt-1.5 font-mono text-2xl font-extrabold tracking-wider text-[var(--ink)]">
                     {c.code}

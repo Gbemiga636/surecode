@@ -1,8 +1,10 @@
 /**
- * SureCode engine — two user modes:
- *  - safe:  short-odds singles (max hit rate)
- *  - boost: larger odds still filtered as sure (singles or rare 2-folds)
- * Multi-sport: football, basketball, tennis, hockey, baseball.
+ * SureCode engine — profit-max stack (never 100% sure):
+ *  - safe:     short-odds singles / tiny cross-sport packs (bankroll protect)
+ *  - boost:    larger favourite-backed odds, cross-sport 2–3 folds
+ *  - longshot: multi-day cross-sport accumulators (higher odds, still filtered)
+ * AI play-out can veto multi-leg slips when OPENAI_API_KEY is set.
+ * Sports: football, basketball, tennis, hockey, baseball.
  */
 import {
   createBookingCode,
@@ -14,7 +16,7 @@ import {
   type SbEvent,
   type SportKey,
 } from "./sporty";
-import { chatPlain } from "./openai";
+import { chatJson, chatPlain } from "./openai";
 import {
   buildLearningSnapshot,
   scoreLeg,
@@ -76,26 +78,38 @@ type ModeLimits = {
 
 const LIMITS: Record<SureMode, ModeLimits> = {
   safe: {
-    minOdds: 1.1,
-    maxOdds: 1.38,
-    minImplied: 0.74,
-    minFavEdge: 0.12,
-    minScore: 1.55,
-    allowDoubles: false,
-    maxDoubleOdds: 0,
-    tennisMax: 1.25,
-    hockeyMax: 1.32,
+    minOdds: 1.08,
+    maxOdds: 1.42,
+    minImplied: 0.72,
+    minFavEdge: 0.1,
+    minScore: 1.45,
+    allowDoubles: true,
+    maxDoubleOdds: 2.25, // cross-sport 2–3 short elites
+    tennisMax: 1.28,
+    hockeyMax: 1.35,
   },
   boost: {
-    minOdds: 1.55,
-    maxOdds: 2.35,
-    minImplied: 0.42,
-    minFavEdge: 0.07,
-    minScore: 1.2,
+    minOdds: 1.5,
+    maxOdds: 2.4,
+    minImplied: 0.4,
+    minFavEdge: 0.06,
+    minScore: 1.15,
     allowDoubles: true,
-    maxDoubleOdds: 3.8,
-    tennisMax: 1.85,
-    hockeyMax: 2.05,
+    maxDoubleOdds: 4.5,
+    tennisMax: 1.9,
+    hockeyMax: 2.1,
+  },
+  /** Multi-day profit lane: solid per-leg favourites → larger combined odds */
+  longshot: {
+    minOdds: 1.35,
+    maxOdds: 2.85,
+    minImplied: 0.35,
+    minFavEdge: 0.08,
+    minScore: 1.08,
+    allowDoubles: true,
+    maxDoubleOdds: 22,
+    tennisMax: 2.25,
+    hockeyMax: 2.45,
   },
 };
 
@@ -170,6 +184,7 @@ function analyzeFootballPick(
   const probs = deVig1x2(ev);
   const analysis: string[] = [];
   let favSide: "home" | "away" | "coin" = "coin";
+  const homeFloor = mode === "safe" ? 0.48 : mode === "boost" ? 0.42 : 0.44;
 
   if (probs) {
     if (probs.home - probs.away >= lim.minFavEdge) favSide = "home";
@@ -179,33 +194,47 @@ function analyzeFootballPick(
     );
 
     if (["DC1X", "DNBH", "HO05", "1"].includes(pickCode)) {
-      if (favSide !== "home" || probs.home < (mode === "safe" ? 0.48 : 0.42)) return null;
+      if (favSide !== "home" || probs.home < homeFloor) return null;
       analysis.push(`Home favourite edge ${(probs.home - probs.away).toFixed(2)}`);
     }
     if (["DCX2", "DNBA", "AO05", "2"].includes(pickCode)) {
-      if (favSide !== "away" || probs.away < (mode === "safe" ? 0.48 : 0.42)) return null;
+      if (favSide !== "away" || probs.away < homeFloor) return null;
       analysis.push(`Away favourite edge ${(probs.away - probs.home).toFixed(2)}`);
     }
     if (pickCode === "O05" && mode === "safe" && odds > 1.28) return null;
-    if (pickCode === "O05" && mode === "boost") return null; // tiny O05 stays in safe only
+    if (pickCode === "O05" && mode !== "safe") return null; // O05 only in safe
+    if (pickCode === "1HO05") {
+      if (mode === "longshot") return null;
+      if (odds > (mode === "safe" ? 1.32 : 1.55)) return null;
+      analysis.push("1st-half Over 0.5 — high-hit period market");
+    }
+    if (pickCode === "1HDC1X") {
+      if (favSide !== "home" || probs.home < 0.45) return null;
+      analysis.push("1st-half double chance on home favourite");
+    }
+    if (pickCode === "1HDCX2") {
+      if (favSide !== "away" || probs.away < 0.45) return null;
+      analysis.push("1st-half double chance on away favourite");
+    }
     if (pickCode === "O15") {
       if (mode === "safe" && (odds > 1.4 || probs.draw > 0.33)) return null;
       if (mode === "boost" && odds > 2.2) return null;
+      if (mode === "longshot" && (odds > 2.4 || probs.draw > 0.32)) return null;
       analysis.push("Goals market aligned with match tempo");
     }
     if (pickCode === "O25") {
-      if (mode !== "boost") return null;
+      if (mode === "safe") return null;
       if (probs.draw > 0.3) return null;
-      analysis.push("Over 2.5 — open game profile for boost");
+      analysis.push("Over 2.5 — open game profile");
     }
     if (pickCode === "BTTSY") {
-      if (mode !== "boost") return null;
+      if (mode === "safe") return null;
       if (probs.draw > 0.34) return null;
       analysis.push("BTTS Yes — both sides expected to score");
     }
     if (
       favSide === "coin" &&
-      !["O05", "O15", "O25", "BTTSY"].includes(pickCode)
+      !["O05", "O15", "O25", "BTTSY", "1HO05"].includes(pickCode)
     ) {
       return null;
     }
@@ -250,11 +279,14 @@ function analyzeFootballPick(
   if (mode === "safe") {
     if (odds <= 1.25) score += 0.5;
     else if (odds <= 1.4) score += 0.2;
-  } else {
-    // Boost: reward larger (but still reasonable) prices
+  } else if (mode === "boost") {
     if (odds >= 1.65 && odds <= 2.1) score += 0.55;
     else if (odds >= 1.55) score += 0.3;
     score += Math.min(0.45, (odds - 1.55) * 0.5);
+  } else {
+    // longshot: reward mid-high prices that still look favoured
+    if (odds >= 1.55 && odds <= 2.35) score += 0.5;
+    score += Math.min(0.55, (odds - 1.4) * 0.35);
   }
   if (probs && favSide === "home") score += probs.home * 0.9;
   if (probs && favSide === "away") score += probs.away * 0.9;
@@ -310,7 +342,15 @@ function analyzeMoneyline(
   let score = scoreLeg(leg, snap) + impliedProb(fav.odds) * 1.2;
   if (fav.odds <= 1.25) score += 0.55;
   if (mode === "boost" && fav.odds >= 1.5) score += 0.2;
+  if (mode === "longshot" && fav.odds >= 1.45) score += 0.35;
   if (score < lim.minScore) return null;
+
+  const modeNote =
+    mode === "safe"
+      ? "Safe-mode short price"
+      : mode === "boost"
+        ? "Boost-mode larger but still favoured"
+        : "Longshot-mode multi-day favourite";
 
   return {
     ...leg,
@@ -319,7 +359,7 @@ function analyzeMoneyline(
       `${ev.sportLabel || ev.sport} moneyline favourite`,
       `Price ${fav.odds.toFixed(2)} (~${Math.round(leg.implied * 100)}% implied)`,
       other ? `Opponent price ${Number(other).toFixed(2)}` : "Clear market favourite",
-      mode === "safe" ? "Safe-mode short price" : "Boost-mode larger but still favoured",
+      modeNote,
       ev.league ? `League: ${ev.league}` : "Open market",
     ],
     favSide: fav.side,
@@ -338,9 +378,23 @@ function buildPool(
     const sport = (ev.sport || "football") as SportKey;
     if (sport === "football") {
       const codes =
-        mode === "boost"
-          ? (["DC1X", "DCX2", "O15", "O25", "DNBH", "DNBA", "BTTSY", "1", "2"] as const)
-          : (["O05", "DC1X", "DCX2", "O15", "HO05", "AO05", "DNBH", "DNBA"] as const);
+        mode === "safe"
+          ? ([
+              "O05",
+              "1HO05",
+              "DC1X",
+              "DCX2",
+              "O15",
+              "HO05",
+              "AO05",
+              "DNBH",
+              "DNBA",
+              "1HDC1X",
+              "1HDCX2",
+            ] as const)
+          : mode === "boost"
+            ? (["DC1X", "DCX2", "O15", "O25", "DNBH", "DNBA", "BTTSY", "1HDC1X", "1HDCX2", "1", "2"] as const)
+            : (["DC1X", "DCX2", "O15", "O25", "DNBH", "DNBA", "BTTSY", "1", "2"] as const);
       for (const code of codes) {
         const a = analyzeFootballPick(ev, code, snap, lim, mode);
         if (a) all.push(a);
@@ -352,19 +406,19 @@ function buildPool(
   }
 
   all.sort((a, b) => {
-    if (mode === "boost") {
-      // Prefer higher prices first among strong scores
-      const sa = a.score + a.odds * 0.55;
-      const sb = b.score + b.odds * 0.55;
-      return sb - sa;
-    }
-    return b.score - a.score;
+    if (mode === "safe") return b.score - a.score;
+    // boost + longshot: favour expected-value style ranking (score × odds)
+    const sa = a.score * Math.log(a.odds + 0.15);
+    const sb = b.score * Math.log(b.odds + 0.15);
+    return sb - sa;
   });
 
   const pool: AnalyzedLeg[] = [];
   const usedEvents = new Set<string>();
   const sportCount = new Map<string, number>();
   const leagueCount = new Map<string, number>();
+  const sportCap = mode === "longshot" ? 4 : mode === "boost" ? 3 : 2;
+  const poolCap = mode === "longshot" ? 20 : 14;
 
   for (const leg of all) {
     if (usedEvents.has(leg.eventId)) continue;
@@ -372,7 +426,7 @@ function buildPool(
     if (best.pickCode !== leg.pickCode) continue;
 
     const sp = leg.sport || "football";
-    if ((sportCount.get(sp) ?? 0) >= (mode === "boost" ? 3 : 2)) continue;
+    if ((sportCount.get(sp) ?? 0) >= sportCap) continue;
     const lg = leg.league || "unknown";
     if ((leagueCount.get(lg) ?? 0) >= 2) continue;
 
@@ -380,9 +434,58 @@ function buildPool(
     sportCount.set(sp, (sportCount.get(sp) ?? 0) + 1);
     leagueCount.set(lg, (leagueCount.get(lg) ?? 0) + 1);
     pool.push(leg);
-    if (pool.length >= 14) break;
+    if (pool.length >= poolCap) break;
   }
   return pool;
+}
+
+type PlayOutResult = {
+  pass: boolean;
+  confidence: number;
+  story: string;
+  risk: string;
+};
+
+/**
+ * AI pre-play: mentally walk the fixtures and veto thin multi-leg slips.
+ * Conservative — rejects when the model is unsure. Never a guarantee.
+ */
+async function aiPlayOutLegs(
+  legs: AnalyzedLeg[],
+  mode: SureMode,
+  totalOdds: number,
+): Promise<PlayOutResult | null> {
+  const block = legs
+    .map(
+      (l, i) =>
+        `${i + 1}. [${l.sportLabel || l.sport}] ${l.home} vs ${l.away}\n` +
+        `   Market: ${l.pickLabel} @ ${l.odds.toFixed(2)} (kickoff ${new Date(l.kickoff).toISOString()})\n` +
+        `   Signals: ${l.analysis.slice(0, 3).join("; ")}`,
+    )
+    .join("\n");
+
+  const result = await chatJson<PlayOutResult>({
+    system:
+      "You are a conservative multi-sport match simulator for a betting desk. " +
+      "Mentally play out each fixture using only the prices and signals given. " +
+      "Reject thin edges. Prefer favourites that look structurally strong. " +
+      "Never invent injuries, lineups, or sources not provided. " +
+      'Return JSON: {"pass":boolean,"confidence":0-1,"story":"2-4 sentences","risk":"one clear risk"}. ' +
+      "pass=true only if you would stake your own bankroll at this price.",
+    user:
+      `Mode: ${mode}\nCombined odds: ${totalOdds.toFixed(2)}\nLegs:\n${block}\n` +
+      `Be strict for longshot stacks. Cross-sport diversification helps but does not remove risk.`,
+    temperature: 0.15,
+    maxTokens: 420,
+  });
+
+  if (!result || typeof result.pass !== "boolean") return null;
+  return {
+    pass: result.pass,
+    confidence: Math.max(0, Math.min(1, Number(result.confidence) || 0)),
+    story: String(result.story || "").slice(0, 600),
+    risk: String(result.risk || "").slice(0, 200),
+  };
 }
 
 async function explainSlip(
@@ -391,7 +494,16 @@ async function explainSlip(
   conf: number,
   snap: LearningSnapshot,
   mode: SureMode,
+  playOut?: PlayOutResult | null,
 ): Promise<string> {
+  if (playOut?.story) {
+    return (
+      `[${mode.toUpperCase()}] AI play-out (~${Math.round(playOut.confidence * 100)}%): ${playOut.story}` +
+      (playOut.risk ? ` Risk: ${playOut.risk}` : "") +
+      ` Combined odds ${totalOdds.toFixed(2)}. Not a guarantee.`
+    );
+  }
+
   const analysisBlock = legs
     .map(
       (l) =>
@@ -404,23 +516,27 @@ async function explainSlip(
 
   const modeLabel =
     mode === "safe"
-      ? "SAFE mode (short-odds single, maximize hit rate)"
-      : "BOOST mode (larger odds, still favourite-backed)";
+      ? "SAFE — elite short prices; may mix sports into a small accumulator"
+      : mode === "boost"
+        ? "BOOST — larger favourite-backed prices; cross-sport stacks allowed"
+        : "LONGSHOT — multi-day cross-sport accumulator aiming at larger payouts with filtered favourites";
+
+  const sports = [...new Set(legs.map((l) => l.sportLabel || l.sport || "Sport"))].join(" + ");
 
   const text = await chatPlain({
     system:
-      "You are Sure AI, a senior multi-sport analyst for a betting intelligence product. Write a clear broadcast-style brief: (1) sport + market chosen, (2) favourite/probability signal from de-vig or price, (3) what history/training supports, (4) one risk caveat. 4–6 short sentences. No guarantees. No hype slang.",
-    user: `${modeLabel}\nCombined odds ${totalOdds.toFixed(2)} · model confidence ~${Math.round(conf * 100)}%.\nTraining: ${snap.advice.slice(0, 5).join(" | ") || "warming up"}\nElite markets: ${snap.eliteMarkets.join(", ") || "n/a"}\n\nSignals:\n${analysisBlock}`,
+      "You are Sure AI for a multi-sport betting desk. Explain why these legs were combined across sports. Cover: (1) each sport/market briefly, (2) why the stack still aims at hit rate / profit, (3) training/history signal if present, (4) one clear risk. 4–6 short sentences. No guarantees. Never invent data sources.",
+    user: `${modeLabel}\nSports in slip: ${sports}\nCombined odds ${totalOdds.toFixed(2)} · model ~${Math.round(conf * 100)}%.\nTraining: ${snap.advice.slice(0, 5).join(" | ") || "warming up"}\nElite markets: ${snap.eliteMarkets.join(", ") || "n/a"}\n\nSignals:\n${analysisBlock}`,
     temperature: 0.28,
-    maxTokens: 360,
+    maxTokens: 380,
   });
 
   if (text) return `[${mode.toUpperCase()}] ${text}`;
 
   const l = legs[0];
   return (
-    `[${mode.toUpperCase()}] ${mode === "safe" ? "Safe single" : "Boost slip"} — ` +
-    `${l?.sportLabel || "sport"}: ${legs.map((x) => `${x.home}/${x.away} ${x.pickLabel}`).join(" · ")}. ` +
+    `[${mode.toUpperCase()}] ${mode} slip — ` +
+    `${legs.map((x) => `${x.sportLabel || x.sport}: ${x.home}/${x.away} ${x.pickLabel}`).join(" · ")}. ` +
     `Odds ~${totalOdds.toFixed(2)} · model ~${Math.round(conf * 100)}%. ` +
     `${l?.analysis?.slice(0, 2).join(". ") || "Full market screen passed"}. Not a guarantee.`
   );
@@ -431,6 +547,7 @@ async function bookSlip(
   legs: AnalyzedLeg[],
   snap: LearningSnapshot,
   mode: SureMode,
+  allowAi: boolean,
 ): Promise<SureSlip | null> {
   if (!legs.length) return null;
   const lim = LIMITS[mode];
@@ -438,10 +555,32 @@ async function bookSlip(
   const totalOdds = legs.reduce((a, l) => a * l.odds, 1);
   if (legs.length >= 2 && totalOdds > lim.maxDoubleOdds) return null;
   const confidence = legs.reduce((a, l) => a * l.implied, 1);
-  if (mode === "safe" && confidence < lim.minImplied && legs[0].pickCode !== "O05") return null;
-  if (mode === "boost" && legs.length >= 2 && confidence < 0.28) return null;
+  if (
+    mode === "safe" &&
+    legs.length === 1 &&
+    confidence < lim.minImplied &&
+    legs[0].pickCode !== "O05" &&
+    legs[0].pickCode !== "1HO05"
+  )
+    return null;
+  if (mode === "safe" && legs.length >= 2 && confidence < 0.45) return null;
+  if (mode === "boost" && legs.length >= 2 && confidence < 0.26) return null;
+  if (mode === "longshot") {
+    if (legs.length < 2) return null; // longshot is always a multi-leg profit pack
+    if (totalOdds < 2.8) return null;
+    if (confidence < 0.1) return null;
+  }
 
-  const rationale = await explainSlip(legs, totalOdds, confidence, snap, mode);
+  let playOut: PlayOutResult | null = null;
+  if (allowAi && legs.length >= 2) {
+    playOut = await aiPlayOutLegs(legs, mode, totalOdds);
+    const floor = mode === "safe" ? 0.55 : mode === "boost" ? 0.4 : 0.28;
+    if (playOut && (!playOut.pass || playOut.confidence < floor)) {
+      return null; // AI veto — thin edge
+    }
+  }
+
+  const rationale = await explainSlip(legs, totalOdds, confidence, snap, mode, playOut);
   const booked = await createBookingCode(legs);
   return {
     slot,
@@ -456,12 +595,61 @@ async function bookSlip(
   };
 }
 
+async function pickCrossSportPack(
+  pool: AnalyzedLeg[],
+  used: Set<string>,
+  legsWanted: number,
+  maxComboOdds: number,
+  minComboOdds: number,
+  preferEv = false,
+): Promise<AnalyzedLeg[] | null> {
+  const available = pool
+    .filter((l) => !used.has(l.eventId))
+    .slice()
+    .sort((a, b) => {
+      if (!preferEv) return b.score - a.score;
+      return b.score * Math.log(b.odds + 0.15) - a.score * Math.log(a.odds + 0.15);
+    });
+  if (available.length < legsWanted) return null;
+
+  // Greedy: take best remaining legs from distinct sports first
+  const pack: AnalyzedLeg[] = [];
+  const sports = new Set<string>();
+  let combo = 1;
+
+  for (const leg of available) {
+    if (pack.length >= legsWanted) break;
+    const sp = leg.sport || "football";
+    if (sports.has(sp) && sports.size < legsWanted) continue;
+    if (combo * leg.odds > maxComboOdds) continue;
+    pack.push(leg);
+    sports.add(sp);
+    combo *= leg.odds;
+  }
+
+  // Fill remaining if diversity left gaps
+  if (pack.length < legsWanted) {
+    for (const leg of available) {
+      if (pack.length >= legsWanted) break;
+      if (pack.some((p) => p.eventId === leg.eventId)) continue;
+      if (combo * leg.odds > maxComboOdds) continue;
+      pack.push(leg);
+      combo *= leg.odds;
+    }
+  }
+
+  if (pack.length < legsWanted) return null;
+  if (combo < minComboOdds || combo > maxComboOdds) return null;
+  return pack;
+}
+
 async function buildModeSlips(
   mode: SureMode,
   fixtures: SbEvent[],
   snap: LearningSnapshot,
   count: number,
   excludeEvents: Set<string>,
+  allowAi: boolean,
 ): Promise<SureSlip[]> {
   const lim = LIMITS[mode];
   const pool = buildPool(
@@ -473,37 +661,62 @@ async function buildModeSlips(
   const slips: SureSlip[] = [];
   const used = new Set<string>(excludeEvents);
 
-  let cursor = 0;
+  // Slot plan — longshot is always multi-leg profit packs
+  const plans: ("single" | "x2" | "x3" | "x4")[] =
+    mode === "safe"
+      ? ["single", "single", "x2"]
+      : mode === "boost"
+        ? ["single", "x2", "x3"]
+        : ["x3", "x4", "x3"];
+
   for (let i = 0; i < count && slips.length < count; i++) {
     const slot = slots[slips.length] ?? slots[slots.length - 1]! + slips.length;
+    const plan = plans[i] ?? (mode === "longshot" ? "x3" : "single");
 
-    if (mode === "boost" && lim.allowDoubles && slips.length >= 1 && slips.length === count - 1) {
-      // Prefer a 2-fold for the last boost slip when two solid larger legs exist
-      const pair: AnalyzedLeg[] = [];
-      for (let j = cursor; j < pool.length && pair.length < 2; j++) {
-        if (used.has(pool[j].eventId)) continue;
-        if (pool[j].odds < 1.55) continue;
-        pair.push(pool[j]);
-      }
-      if (pair.length === 2) {
-        const combo = pair[0].odds * pair[1].odds;
-        if (combo >= 2.4 && combo <= lim.maxDoubleOdds) {
-          used.add(pair[0].eventId);
-          used.add(pair[1].eventId);
-          const slip = await bookSlip(slot, pair, snap, mode);
-          if (slip?.code) {
-            slips.push(slip);
-            continue;
-          }
+    if (plan === "x2" || plan === "x3" || plan === "x4") {
+      const n = plan === "x4" ? 4 : plan === "x3" ? 3 : 2;
+      const minCombo = mode === "safe" ? 1.2 : mode === "boost" ? 2.2 : 3.2;
+      let pack = await pickCrossSportPack(
+        pool,
+        used,
+        n,
+        lim.maxDoubleOdds,
+        minCombo,
+        mode !== "safe",
+      );
+      // Longshot: step down legs if 4-fold not available
+      if (!pack && mode === "longshot" && n > 2) {
+        for (const alt of [3, 2] as const) {
+          if (alt >= n) continue;
+          pack = await pickCrossSportPack(
+            pool,
+            used,
+            alt,
+            lim.maxDoubleOdds,
+            alt === 2 ? 2.8 : 3.2,
+            true,
+          );
+          if (pack) break;
         }
       }
+      if (pack) {
+        for (const l of pack) used.add(l.eventId);
+        const slip = await bookSlip(slot, pack, snap, mode, allowAi);
+        if (slip?.code) {
+          slips.push(slip);
+          continue;
+        }
+        for (const l of pack) used.delete(l.eventId);
+      }
+      if (mode === "longshot") continue; // no single fallback for longshot
+      // fallback single for safe/boost
     }
 
-    while (cursor < pool.length && used.has(pool[cursor].eventId)) cursor++;
-    if (cursor >= pool.length) break;
-    const leg = pool[cursor++];
-    used.add(leg.eventId);
-    const slip = await bookSlip(slot, [leg], snap, mode);
+    if (mode === "longshot") continue;
+    const next = pool.find((l) => !used.has(l.eventId));
+    if (!next) break;
+    used.add(next.eventId);
+    const slip = await bookSlip(slot, [next], snap, mode, allowAi);
     if (slip?.code) slips.push(slip);
   }
 
@@ -511,7 +724,7 @@ async function buildModeSlips(
 }
 
 /**
- * Build safe (slots 1–3) + boost (slots 4–6) Sure slips.
+ * Build Safe (1–3) + Boost (4–6) + Longshot (7–9) Sure slips.
  */
 export async function buildSureSlipsOfDay(
   count = 3,
@@ -519,24 +732,33 @@ export async function buildSureSlipsOfDay(
   opts: { allowAi?: boolean; legHistory?: LegHistoryRow[]; modes?: SureMode[] } = {},
 ): Promise<SureSlip[]> {
   const now = Date.now();
-  const fixtures = (await getAllSportyFixtures({ maxPagesPerSport: 3 })).filter(
+  const allowAi = Boolean(opts.allowAi && process.env.OPENAI_API_KEY);
+  const allFixtures = await getAllSportyFixtures({ maxPagesPerSport: 4 });
+
+  const near = allFixtures.filter(
     (e) => e.kickoff > now + 40 * 60_000 && e.kickoff < now + 36 * 3600_000,
+  );
+  // Longshot window: later today through ~5 days (multi-day profit packs)
+  const multiDay = allFixtures.filter(
+    (e) => e.kickoff > now + 2 * 3600_000 && e.kickoff < now + 5 * 24 * 3600_000,
   );
 
   const snap = buildLearningSnapshot(opts.legHistory ?? []);
-  const modes = opts.modes ?? (["safe", "boost"] as SureMode[]);
+  const modes = opts.modes ?? (["safe", "boost", "longshot"] as SureMode[]);
   const slips: SureSlip[] = [];
   const used = new Set<string>();
 
   for (const mode of modes) {
-    const built = await buildModeSlips(mode, fixtures, snap, count, used);
+    const fixtures = mode === "longshot" ? multiDay : near;
+    // Fresh exclusion per mode so Longshot isn't starved by Safe/Larger legs
+    const modeUsed = mode === "longshot" ? new Set<string>() : used;
+    const built = await buildModeSlips(mode, fixtures, snap, count, modeUsed, allowAi);
     for (const s of built) {
       for (const l of s.legs) used.add(l.eventId);
       slips.push(s);
     }
   }
 
-  void opts.allowAi;
   return slips;
 }
 
