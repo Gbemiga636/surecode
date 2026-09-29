@@ -67,14 +67,14 @@ const SLIDES: Slide[] = [
     tone: "red",
   },
   {
-    id: "gpt",
-    kicker: "Connect ChatGPT",
-    title: "Your own Sure Code analyst",
-    body: "A JSON API for Custom GPTs — live fixtures, de-vigged prices, Brier score, log loss, calibration.",
+    id: "liked",
+    kicker: "Liked codes",
+    title: "Track every code you back",
+    body: "Like one code or many. See which won, which lost, and the exact game and score that decided it.",
     image: STADIUM,
-    href: "/how",
-    cta: "How it works",
-    icon: "bot",
+    href: "/signup",
+    cta: "Start tracking",
+    icon: "heart",
     tone: "gold",
   },
 ];
@@ -82,7 +82,7 @@ const SLIDES: Slide[] = [
 const FEATURES: { icon: IconName; title: string; body: string }[] = [
   { icon: "bolt", title: "Live SportyBet prices", body: "Crawled across football, basketball, tennis, hockey and baseball." },
   { icon: "brain", title: "AI play-out veto", body: "Multi-leg packs are simulated first; thin legs get dropped." },
-  { icon: "gauge", title: "Calibration tracked", body: "Brier score, log loss and hit-rate intervals on settled legs." },
+  { icon: "heart", title: "Win / loss tracker", body: "Like codes and see what won, what lost, and why." },
   { icon: "layers", title: "Build & edit codes", body: "Pick markets or paste a long code and rebuild it shorter." },
   { icon: "wallet", title: "Practice wallet", body: "Stake virtually and learn the board before real money." },
   { icon: "lock", title: "No guarantees", body: "Every slip ships with risk notes. 18+ and bet responsibly." },
@@ -229,7 +229,7 @@ export default async function LandingPage() {
       <section className="lp-slider-wrap" aria-label="Inside SureCode">
         <div className="lp-section-head">
           <p className="lp-eyebrow">Inside SureCode</p>
-          <h2>One board. Three lanes. Your own analyst.</h2>
+          <h2>One board. Three lanes. Every result tracked.</h2>
         </div>
         <HeroSlider slides={SLIDES} />
       </section>
@@ -276,42 +276,6 @@ export default async function LandingPage() {
             </span>
           </div>
         </div>
-      </section>
-
-      <section className="lp-gpt" aria-label="Connect ChatGPT">
-        <div className="lp-gpt-copy">
-          <p className="lp-eyebrow">
-            <Icon name="bot" size={14} className="lp-eyebrow-ic" /> Custom GPT ready
-          </p>
-          <h2>
-            Ask the board{" "}
-            <Typewriter
-              className="lp-gpt-type"
-              phrases={["for today’s codes.", "for its Brier score.", "about calibration.", "for de-vigged odds."]}
-            />
-          </h2>
-          <p>
-            SureCode ships an OpenAPI schema for ChatGPT Actions. Your GPT can pull live
-            fixtures, settled history and calibration metrics, and it reports uncertainty instead
-            of promising wins.
-          </p>
-        </div>
-        <figure className="lp-gpt-fig">
-          <figcaption className="lp-gpt-cap">Example response shape · illustrative values</figcaption>
-          <pre className="lp-gpt-code" aria-hidden>
-            {`GET /api/gpt/metrics?days=90
-{
-  "legs": {
-    "overall": {
-      "brier": 0.198,
-      "logLoss": 0.583,
-      "hitRate95ci": [0.71, 0.79]
-    },
-    "calibration": { "ece": 0.041 }
-  }
-}`}
-          </pre>
-        </figure>
       </section>
 
       <section className="lp-board">

@@ -129,7 +129,7 @@ export function AppChrome({
             onClick={() => setOpen(false)}
             aria-label="Close menu"
           >
-            <Icon name="close" />
+            <Icon name="close" className="hb-ic" />
           </button>
         </div>
 
@@ -169,6 +169,7 @@ export function AppChrome({
           </div>
           <form action="/auth/signout" method="post" className="side-signout-form">
             <button type="submit" className="signout-link">
+              <Icon name="signout" size={16} className="so-ic" />
               Sign out
             </button>
           </form>
@@ -198,7 +199,8 @@ export function AppChrome({
               aria-expanded={open}
               aria-controls="sidebar"
             >
-              <Icon name="menu" size={20} />
+              <Icon name="menu" size={20} className="hb-ic" />
+              <span className="hb-t">Menu</span>
             </button>
           </div>
         </div>
