@@ -8,6 +8,7 @@ import {
 } from "./sure-engine";
 import { fetchFinalScore, settlePick, type BookableLeg } from "./sporty";
 import type { LegHistoryRow } from "./learning";
+import { settleLikedCodes } from "./liked";
 import {
   buildPlentyCodes,
   getAnalysisBoard,
@@ -300,6 +301,14 @@ export async function runSureCrawl(): Promise<CrawlResult> {
 
     if (deadline.ok(2000)) {
       settledTotal += await settlePendingCodes(sb, deadline, 6, 4);
+    }
+
+    if (deadline.ok(4000)) {
+      try {
+        settledTotal += await settleLikedCodes(sb, { limit: 15, deadline });
+      } catch (e) {
+        console.warn("[crawl] liked codes:", fmtErr(e));
+      }
     }
 
     const aiOn = Boolean(process.env.OPENAI_API_KEY);

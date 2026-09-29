@@ -14,4 +14,5 @@ export const T = {
   preferences: "sc_preferences",
   savedPicks: "sc_saved_picks",
   legHistory: "sc_leg_history",
+  likedCodes: "sc_liked_codes",
 } as const;

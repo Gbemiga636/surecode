@@ -3,6 +3,7 @@ import { T } from "@/lib/db";
 import { sportyOpenUrl } from "@/lib/sporty";
 import { SavePrefsForm } from "@/components/SavePrefsForm";
 import { PageHeader } from "@/components/PageHeader";
+import { LikeToggle } from "@/components/LikedCodes";
 
 export default async function SavedPage() {
   const supabase = await createClient();
@@ -56,14 +57,17 @@ export default async function SavedPage() {
                 {g.origin} · odds {g.total_odds != null ? Number(g.total_odds).toFixed(2) : "—"}
               </p>
             </div>
-            <a
-              className="sc-btn-ghost text-xs"
-              href={g.share_url || sportyOpenUrl(g.code)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Open
-            </a>
+            <div className="flex flex-wrap items-center gap-2">
+              <LikeToggle target={{ code: g.code, source: "generated", lane: g.origin }} />
+              <a
+                className="sc-btn-ghost text-xs"
+                href={g.share_url || sportyOpenUrl(g.code)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open
+              </a>
+            </div>
           </div>
         ))}
       </div>

@@ -47,11 +47,15 @@ function formatKick(ms?: number) {
 export function SureHomeClient({
   day,
   codes,
+  initialMode = "safe",
+  fromUrl = false,
 }: {
   day: string;
   codes: SureHomeCode[];
+  initialMode?: SureModeChoice;
+  fromUrl?: boolean;
 }) {
-  const [mode, setMode] = useState<SureModeChoice>("safe");
+  const [mode, setMode] = useState<SureModeChoice>(initialMode);
 
   const filtered = useMemo(() => {
     return codes.filter((c) => modeForSlot(c.slot) === mode);
@@ -64,7 +68,7 @@ export function SureHomeClient({
 
   return (
     <div className="sure-home">
-      <SureModePicker initial="safe" onChange={setMode} />
+      <SureModePicker initial={initialMode} preferInitial={fromUrl} onChange={setMode} />
 
       {emptyBoost && (
         <div className="sc-empty sc-rise mb-4">

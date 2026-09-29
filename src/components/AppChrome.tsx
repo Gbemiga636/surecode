@@ -16,6 +16,7 @@ const GROUPS: {
       { href: "/builder", label: "Build combos", icon: "layers" },
       { href: "/edit", label: "Edit long codes", icon: "layers" },
       { href: "/codes", label: "Plenty codes", icon: "dashboard" },
+      { href: "/liked", label: "Liked codes", icon: "heart" },
     ],
   },
   {
@@ -60,6 +61,10 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/predictions": {
     title: "Predictions",
     subtitle: "Favourite tips from live SportyBet prices",
+  },
+  "/liked": {
+    title: "Liked codes",
+    subtitle: "Won · lost · pending · why it lost",
   },
   "/saved": {
     title: "Saved",

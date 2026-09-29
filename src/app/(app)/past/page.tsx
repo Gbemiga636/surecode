@@ -5,6 +5,7 @@ import { sportyOpenUrl } from "@/lib/sporty";
 import { PageHeader } from "@/components/PageHeader";
 import { PastFilters } from "@/components/PastFilters";
 import { ReadMore } from "@/components/ReadMore";
+import { LikeToggle } from "@/components/LikedCodes";
 
 export const dynamic = "force-dynamic";
 
@@ -176,7 +177,8 @@ export default async function PastPage({
                     </span>
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <LikeToggle target={{ code: r.code, source: "past", day: r.day }} />
                   <span className={`rounded-lg px-2.5 py-1 text-xs font-extrabold ${tone}`}>
                     {outcome}
                   </span>

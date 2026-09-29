@@ -19,7 +19,24 @@ export type IconName =
   | "bolt"
   | "copy"
   | "external"
-  | "shield";
+  | "shield"
+  | "football"
+  | "basketball"
+  | "tennis"
+  | "hockey"
+  | "baseball"
+  | "spark"
+  | "lock"
+  | "clock"
+  | "trend"
+  | "check"
+  | "arrowRight"
+  | "chevronLeft"
+  | "chevronRight"
+  | "fire"
+  | "star"
+  | "gauge"
+  | "signout";
 
 const PATHS: Record<IconName, string> = {
   dashboard: `<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>`,
@@ -42,6 +59,23 @@ const PATHS: Record<IconName, string> = {
   copy: `<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`,
   external: `<path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>`,
   shield: `<path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5Z"/>`,
+  football: `<circle cx="12" cy="12" r="9"/><path d="m12 7 4 2.9-1.5 4.7h-5L8 9.9Z"/><path d="M12 7V3.2M16 9.9l3.6-1.2M14.5 14.6l2.3 3.1M9.5 14.6l-2.3 3.1M8 9.9 4.4 8.7"/>`,
+  basketball: `<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18"/><path d="M5.6 5.6a9 9 0 0 1 0 12.8M18.4 5.6a9 9 0 0 0 0 12.8"/>`,
+  tennis: `<circle cx="12" cy="12" r="9"/><path d="M5.2 5.8a9 9 0 0 1 0 12.4M18.8 5.8a9 9 0 0 0 0 12.4"/>`,
+  hockey: `<path d="M4 3l7 13.5a2 2 0 0 0 1.8 1.1H20"/><path d="M20 3l-5.4 10.4"/><ellipse cx="7" cy="19.5" rx="3" ry="1.5"/>`,
+  baseball: `<circle cx="12" cy="12" r="9"/><path d="M6.3 5.3c1.8 1.9 2.7 4.2 2.7 6.7s-.9 4.8-2.7 6.7M17.7 5.3c-1.8 1.9-2.7 4.2-2.7 6.7s.9 4.8 2.7 6.7"/>`,
+  spark: `<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>`,
+  lock: `<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>`,
+  clock: `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`,
+  trend: `<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>`,
+  check: `<path d="M20 6 9 17l-5-5"/>`,
+  arrowRight: `<path d="M5 12h14M13 6l6 6-6 6"/>`,
+  chevronLeft: `<path d="m15 18-6-6 6-6"/>`,
+  chevronRight: `<path d="m9 18 6-6-6-6"/>`,
+  fire: `<path d="M12 22c4 0 7-2.8 7-7 0-3.5-2.3-6.2-4-8-.4 2.3-1.6 3.6-3 4 .5-3.2-1-6.5-4-9 0 4-5 6.5-5 13 0 4.2 3 7 9 7Z"/>`,
+  star: `<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9Z"/>`,
+  gauge: `<path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-5"/><circle cx="12" cy="13" r="1.3"/>`,
+  signout: `<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4M6 12h10"/>`,
 };
 
 export function Icon({

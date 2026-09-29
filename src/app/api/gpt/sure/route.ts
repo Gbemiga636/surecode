@@ -97,6 +97,8 @@ export async function GET(request: Request) {
         day,
         disclaimer:
           "These are model-filtered SportyBet codes, not guarantees. Gamble responsibly.",
+        confidenceBasis:
+          "confidence (%) = product of market-implied leg probabilities (1/odds, bookmaker margin included). Not a calibrated model probability.",
         count: codes.length,
         codes,
       },

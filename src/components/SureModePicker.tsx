@@ -8,15 +8,21 @@ const KEY = "surecode_sure_mode";
 
 export function SureModePicker({
   initial = "safe",
+  preferInitial = false,
   onChange,
 }: {
   initial?: SureModeChoice;
+  preferInitial?: boolean;
   onChange?: (mode: SureModeChoice) => void;
 }) {
   const [mode, setMode] = useState<SureModeChoice>(initial);
 
   useEffect(() => {
     try {
+      if (preferInitial) {
+        localStorage.setItem(KEY, initial);
+        return;
+      }
       const saved = localStorage.getItem(KEY) as SureModeChoice | null;
       if (saved === "safe" || saved === "boost" || saved === "longshot") {
         setMode(saved);

@@ -3,18 +3,25 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Icon } from "./Icons";
+import { LikeToggle, type LikeTarget } from "./LikedCodes";
 
 export function CodeActions({
   code,
   openUrl,
   sureCodeId,
   codeId,
+  like,
 }: {
   code: string;
   openUrl: string;
   sureCodeId?: string;
   codeId?: string;
+  like?: LikeTarget | false;
 }) {
+  const likeTarget: LikeTarget | null =
+    like === false
+      ? null
+      : (like ?? { code, source: sureCodeId ? "sure" : codeId ? "codes" : "manual" });
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [stake, setStake] = useState("1000");
@@ -79,6 +86,7 @@ export function CodeActions({
             Demo ₦
           </button>
         )}
+        {likeTarget && <LikeToggle target={likeTarget} />}
       </div>
 
       {open && (
