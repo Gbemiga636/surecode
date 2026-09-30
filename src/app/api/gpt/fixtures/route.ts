@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllSportyFixtures, type SbEvent, type SportKey } from "@/lib/sporty";
-import { gptAuthorized } from "@/lib/gpt-auth";
+import { gptAuthorized, gptUnauthorized } from "@/lib/gpt-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,9 +34,7 @@ function mainMarket(ev: SbEvent) {
 }
 
 export async function GET(request: Request) {
-  if (!gptAuthorized(request)) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  if (!gptAuthorized(request)) return gptUnauthorized(request);
 
   const url = new URL(request.url);
   const sportParam = (url.searchParams.get("sport") || "all").toLowerCase();

@@ -27,6 +27,12 @@ const LikeContext = createContext<Ctx | null>(null);
 
 const norm = (c: string) => c.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 
+/** Page a like came from, so /liked can compare win rates per page. */
+function pageSource(path: string): string {
+  const seg = path.split("/").filter(Boolean)[0] ?? "home";
+  return seg === "liked" ? "manual" : seg;
+}
+
 const MIGRATION_HINT = "Liked codes need a one-time setup: run sql/schema-liked.sql in Supabase.";
 
 export function useLikes() {
@@ -61,15 +67,16 @@ export function LikeProvider({ children }: { children: React.ReactNode }) {
   }, [toast]);
 
   const save = useCallback(async (targets: LikeTarget[]) => {
+    const source = pageSource(path);
     const res = await fetch("/api/liked", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: targets }),
+      body: JSON.stringify({ items: targets.map((t) => ({ ...t, source })) }),
     });
     const j = await res.json();
     if (!j.ok) throw new Error(j.needsMigration ? MIGRATION_HINT : j.error || "Could not save");
     return (j.saved as string[]).map(norm);
-  }, []);
+  }, [path]);
 
   const remove = useCallback(async (codes: string[]) => {
     const res = await fetch("/api/liked", {

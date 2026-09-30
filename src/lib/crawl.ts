@@ -194,6 +194,7 @@ export async function runSureCrawl(): Promise<CrawlResult> {
         allowAi,
         legHistory,
         modes: ["safe", "boost", "longshot"],
+        deadline,
       });
 
       for (const slip of slips) {

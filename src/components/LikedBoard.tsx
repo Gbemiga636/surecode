@@ -6,6 +6,7 @@ import type { LegResult, LikedOutcome, LikedRow } from "@/lib/liked";
 import { Icon, type IconName } from "@/components/Icons";
 import { LikeToggle, useLikes } from "@/components/LikedCodes";
 import { sportIcon } from "@/components/OddsTicker";
+import { sourceLabel, sourcePage } from "@/lib/liked-source";
 
 type StatusFilter = "ALL" | LikedOutcome;
 type Sort = "newest" | "oldest" | "oddsHigh" | "oddsLow";
@@ -41,17 +42,32 @@ const LEG_ICON: Record<LegResult["status"], IconName> = {
   unknown: "pulse",
 };
 
+const PAGE_ICON: Record<string, IconName> = {
+  home: "shield",
+  codes: "layers",
+  past: "clock",
+  saved: "heart",
+  manual: "target",
+};
+
 function laneKey(lane: string | null, source: string): string {
   const l = (lane ?? "").toLowerCase();
+  // Plenty codes saved before lanes were prefixed stored the bare code type ("safe").
+  if (l.startsWith("plenty") || sourcePage(source) === "codes") return "plenty";
   if (l === "safe" || l === "boost" || l === "longshot") return l;
-  if (source === "codes") return "plenty";
   return "custom";
 }
 
 function laneLabel(lane: string | null, source: string): string {
   const key = laneKey(lane, source);
-  if (key === "plenty") return (lane ?? "Plenty").toUpperCase();
+  if (key === "plenty") return (lane ?? "plenty").replace(/^plenty-/, "").toUpperCase();
   return LANES.find((l) => l.key === key)?.label ?? "Custom";
+}
+
+type PageStat = { key: string; label: string; liked: number; won: number; lost: number; pending: number };
+
+function pct(n: number, d: number) {
+  return d ? Math.round((n / d) * 100) : null;
 }
 
 function fmtDate(iso: string | null) {
@@ -73,6 +89,7 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("ALL");
   const [lane, setLane] = useState("all");
+  const [page, setPage] = useState("all");
   const [sport, setSport] = useState("all");
   const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState<Sort>("newest");
@@ -93,6 +110,22 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
     return c;
   }, [rows]);
 
+  const pages = useMemo(() => {
+    const m = new Map<string, PageStat>();
+    for (const r of rows) {
+      const key = sourcePage(r.source);
+      const s = m.get(key) ?? { key, label: sourceLabel(key), liked: 0, won: 0, lost: 0, pending: 0 };
+      s.liked++;
+      if (r.outcome === "WON") s.won++;
+      else if (r.outcome === "LOST") s.lost++;
+      else if (r.outcome === "PENDING") s.pending++;
+      m.set(key, s);
+    }
+    return [...m.values()].sort(
+      (a, b) => (pct(b.won, b.won + b.lost) ?? -1) - (pct(a.won, a.won + a.lost) ?? -1) || b.liked - a.liked,
+    );
+  }, [rows]);
+
   const decided = counts.WON + counts.LOST;
   const hitRate = decided ? Math.round((counts.WON / decided) * 100) : null;
   const bestWin = rows
@@ -106,6 +139,7 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
     const list = rows.filter((r) => {
       if (status !== "ALL" && r.outcome !== status) return false;
       if (lane !== "all" && laneKey(r.lane, r.source) !== lane) return false;
+      if (page !== "all" && sourcePage(r.source) !== page) return false;
       if (sport !== "all" && !(r.legs ?? []).some((l) => (l.sport ?? "football").toLowerCase() === sport))
         return false;
       if (since && new Date(r.created_at).getTime() < since) return false;
@@ -126,7 +160,7 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
       const d = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       return sort === "oldest" ? -d : d;
     });
-  }, [rows, query, status, lane, sport, period, sort]);
+  }, [rows, query, status, lane, page, sport, period, sort]);
 
   async function checkResults() {
     setChecking(true);
@@ -166,7 +200,7 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
   }
 
   const filtersActive =
-    query || status !== "ALL" || lane !== "all" || sport !== "all" || period !== "all";
+    query || status !== "ALL" || lane !== "all" || page !== "all" || sport !== "all" || period !== "all";
 
   return (
     <div className="lb">
@@ -230,6 +264,57 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
         </div>
       )}
 
+      {pages.length > 0 && (
+        <section className="lb-pages sc-rise" aria-label="Win rate by page">
+          <div className="lb-pages-head">
+            <p className="lb-pages-k">
+              <Icon name="gauge" size={14} /> Win rate by page
+            </p>
+            <p className="lb-pages-sub">Where your liked codes came from, and how each page performed.</p>
+          </div>
+          <div className="lb-pages-grid">
+            {pages.map((p) => {
+              const d = p.won + p.lost;
+              const win = pct(p.won, d);
+              const loss = pct(p.lost, d);
+              const on = page === p.key;
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  className={`lb-page${on ? " is-on" : ""}`}
+                  aria-pressed={on}
+                  onClick={() => setPage(on ? "all" : p.key)}
+                >
+                  <span className="lb-page-top">
+                    <span className="lb-page-ic">
+                      <Icon name={PAGE_ICON[p.key] ?? "layers"} size={15} />
+                    </span>
+                    <span className="lb-page-name">{p.label}</span>
+                    <span className="lb-page-n">{p.liked} liked</span>
+                  </span>
+                  <span className="lb-page-rates">
+                    <span className="lb-page-win">
+                      <strong>{win != null ? `${win}%` : "—"}</strong> win
+                    </span>
+                    <span className="lb-page-loss">
+                      <strong>{loss != null ? `${loss}%` : "—"}</strong> loss
+                    </span>
+                  </span>
+                  <span className="lb-page-bar" aria-hidden>
+                    <span className="lb-page-bar-w" style={{ width: `${win ?? 0}%` }} />
+                    <span className="lb-page-bar-l" style={{ width: `${loss ?? 0}%` }} />
+                  </span>
+                  <span className="lb-page-foot">
+                    {p.won} won · {p.lost} lost · {p.pending} pending
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="lb-tools sc-card" aria-label="Filters">
         <div className="lb-row">
           <label className="lb-search">
@@ -280,6 +365,14 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
               </option>
             ))}
           </select>
+          <select value={page} onChange={(e) => setPage(e.target.value)} aria-label="Liked from page">
+            <option value="all">All pages</option>
+            {pages.map((p) => (
+              <option key={p.key} value={p.key}>
+                From {p.label}
+              </option>
+            ))}
+          </select>
           <select value={sport} onChange={(e) => setSport(e.target.value)} aria-label="Sport">
             <option value="all">All sports</option>
             {sports.map((s) => (
@@ -327,6 +420,7 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
               setQuery("");
               setStatus("ALL");
               setLane("all");
+              setPage("all");
               setSport("all");
               setPeriod("all");
             }}
@@ -370,6 +464,10 @@ export function LikedBoard({ rows, needsSetup }: { rows: LikedRow[]; needsSetup:
                       {meta.label}
                     </span>
                     <span className="sport-chip">{laneLabel(r.lane, r.source)}</span>
+                    <span className="lb-from">
+                      <Icon name={PAGE_ICON[sourcePage(r.source)] ?? "layers"} size={12} />
+                      From {sourceLabel(r.source)}
+                    </span>
                     {r.day && <span className="lb-day">{r.day}</span>}
                   </div>
                   <p className="lb-code">{r.code}</p>

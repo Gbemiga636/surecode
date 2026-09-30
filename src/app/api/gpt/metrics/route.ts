@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { T } from "@/lib/db";
-import { gptAuthorized } from "@/lib/gpt-auth";
+import { gptAuthorized, gptUnauthorized } from "@/lib/gpt-auth";
 import { calibration, inferSport, summarize, type Sample } from "@/lib/metrics";
 
 export const dynamic = "force-dynamic";
@@ -37,9 +37,7 @@ function groupBy(rows: LegRow[], key: (r: LegRow) => string, minN: number) {
  * Slip forecast = stored confidence (product of implied leg probabilities).
  */
 export async function GET(request: Request) {
-  if (!gptAuthorized(request)) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  if (!gptAuthorized(request)) return gptUnauthorized(request);
 
   const url = new URL(request.url);
   const days = Math.min(365, Math.max(7, Number(url.searchParams.get("days")) || 90));

@@ -6,7 +6,6 @@ import { SureHomeClient, type SureHomeCode } from "@/components/SureHomeClient";
 import { Typewriter } from "@/components/Typewriter";
 import { HeroSlider, type Slide } from "@/components/HeroSlider";
 import { OddsTicker, type TickerItem } from "@/components/OddsTicker";
-import { SportRail } from "@/components/SportRail";
 import { Icon, type IconName } from "@/components/Icons";
 import type { SureModeChoice } from "@/components/SureModePicker";
 
@@ -83,15 +82,12 @@ export default async function HomePage({
   const rows = (codes ?? []) as SureHomeCode[];
 
   const legs = rows.flatMap((r) => r.legs ?? []);
-  const counts: Record<string, number> = {};
-  const ticker: TickerItem[] = legs.slice(0, 24).map((l) => {
-    const sport = l.sport ?? "football";
-    return { match: `${l.home} v ${l.away}`, pick: l.pickLabel, odds: l.odds, sport };
-  });
-  for (const l of legs) {
-    const s = l.sport ?? "football";
-    counts[s] = (counts[s] ?? 0) + 1;
-  }
+  const ticker: TickerItem[] = legs.slice(0, 24).map((l) => ({
+    match: `${l.home} v ${l.away}`,
+    pick: l.pickLabel,
+    odds: l.odds,
+    sport: l.sport ?? "football",
+  }));
 
   const safeOdds = rows
     .filter((r) => modeForSlot(r.slot) === "safe" && r.total_odds)
@@ -121,10 +117,6 @@ export default async function HomePage({
               />
             </span>
           </h2>
-          <p className="dh-sub">
-            Safe, Larger and Longshot lanes: cross-sport packs, AI play-out veto, profit-first.
-            Never a guarantee, so stake what you can afford to lose.
-          </p>
         </div>
         <ul className="dh-stats" aria-label="Today at a glance">
           {stats.map((s, i) => (
@@ -141,13 +133,7 @@ export default async function HomePage({
 
       <OddsTicker items={ticker} label={ticker.length ? "Today’s legs" : "Board loading"} />
 
-      <div className="dh-grid">
-        <HeroSlider slides={PROMOS} variant="promo" intervalMs={5500} />
-        <aside className="dh-side">
-          <p className="dh-side-k">Sports on today’s board</p>
-          <SportRail counts={counts} tone="light" />
-        </aside>
-      </div>
+      <HeroSlider slides={PROMOS} variant="promo" intervalMs={5500} />
 
       <div id="board">
         <SureHomeClient

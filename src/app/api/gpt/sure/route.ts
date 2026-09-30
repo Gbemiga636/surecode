@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { T } from "@/lib/db";
 import { lagosDay } from "@/lib/sure-engine";
 import { modeForSlot, modeLabel, type SureMode } from "@/lib/sure-mode";
-import { gptAuthorized } from "@/lib/gpt-auth";
+import { gptAuthorized, gptUnauthorized } from "@/lib/gpt-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,12 +24,7 @@ type Leg = {
  * Auth: Authorization: Bearer <GPT_API_SECRET>
  */
 export async function GET(request: Request) {
-  if (!gptAuthorized(request)) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized. Use Bearer GPT_API_SECRET." },
-      { status: 401 },
-    );
-  }
+  if (!gptAuthorized(request)) return gptUnauthorized(request);
 
   const url = new URL(request.url);
   const modeParam = (url.searchParams.get("mode") || "all").toLowerCase();

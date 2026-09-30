@@ -3,6 +3,7 @@ import { T } from "./db";
 import type { Deadline } from "./budget";
 import { fetchFinalScore, fetchShareCode, settlePick } from "./sporty";
 import { modeForSlot } from "./sure-mode";
+import { SOURCE_PAGES, sourcePage } from "./liked-source";
 
 export type LikedLeg = {
   eventId?: string;
@@ -92,10 +93,16 @@ function cleanLegs(raw: unknown): LikedLeg[] {
 }
 
 /**
- * Prefer the server-side copy of a code (sure / plenty / past / generated) over whatever
- * the client sent, so the saved legs match what was actually booked.
+ * Legs, odds and lane come from the server-side copy of the code so they match what was
+ * booked; `source` keeps the page the user liked it from so per-page win rates are honest.
  */
 export async function resolveCode(sb: Sb, payload: LikePayload) {
+  const resolved = await lookupCode(sb, payload);
+  const page = payload.source ? String(payload.source).toLowerCase() : "";
+  return { ...resolved, source: page in SOURCE_PAGES ? page : sourcePage(resolved.source) };
+}
+
+async function lookupCode(sb: Sb, payload: LikePayload) {
   const code = normalizeCode(payload.code);
   const base = {
     code,
@@ -139,7 +146,7 @@ export async function resolveCode(sb: Sb, payload: LikePayload) {
     return {
       ...base,
       source: "codes",
-      lane: String(plenty.code_type ?? "custom").toLowerCase(),
+      lane: `plenty-${String(plenty.code_type ?? "custom").toLowerCase()}`,
       day: plenty.day,
       share_url: plenty.share_url,
       total_odds: plenty.total_odds,

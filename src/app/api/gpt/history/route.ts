@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { T } from "@/lib/db";
-import { gptAuthorized } from "@/lib/gpt-auth";
+import { gptAuthorized, gptUnauthorized } from "@/lib/gpt-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,9 +9,7 @@ export const runtime = "nodejs";
 type Leg = { home?: string; away?: string; pickLabel?: string; pickCode?: string; odds?: number };
 
 export async function GET(request: Request) {
-  if (!gptAuthorized(request)) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  }
+  if (!gptAuthorized(request)) return gptUnauthorized(request);
 
   const url = new URL(request.url);
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 50));

@@ -107,7 +107,8 @@ const LIMITS: Record<SureMode, ModeLimits> = {
     minFavEdge: 0.08,
     minScore: 1.08,
     allowDoubles: true,
-    maxDoubleOdds: 22,
+    // Must stay consistent with bookSlip's longshot floor (confidence ≥ 0.1 ≈ combined odds ≤ ~9)
+    maxDoubleOdds: 8.5,
     tennisMax: 2.25,
     hockeyMax: 2.45,
   },
@@ -638,9 +639,44 @@ async function pickCrossSportPack(
     }
   }
 
-  if (pack.length < legsWanted) return null;
-  if (combo < minComboOdds || combo > maxComboOdds) return null;
-  return pack;
+  if (pack.length >= legsWanted && combo >= minComboOdds && combo <= maxComboOdds) return pack;
+  return searchPack(available.slice(0, 12), legsWanted, minComboOdds, maxComboOdds, preferEv);
+}
+
+/** Exhaustive search over the top legs when greedy overshoots/undershoots the odds band. */
+function searchPack(
+  legs: AnalyzedLeg[],
+  n: number,
+  minCombo: number,
+  maxCombo: number,
+  preferEv: boolean,
+): AnalyzedLeg[] | null {
+  const value = (l: AnalyzedLeg) => (preferEv ? l.score * Math.log(l.odds + 0.15) : l.score);
+  let best: AnalyzedLeg[] | null = null;
+  let bestScore = -Infinity;
+  const pick: AnalyzedLeg[] = [];
+
+  const walk = (start: number, combo: number) => {
+    if (combo > maxCombo) return;
+    if (pick.length === n) {
+      if (combo < minCombo) return;
+      const sports = new Set(pick.map((l) => l.sport || "football")).size;
+      const s = pick.reduce((a, l) => a + value(l), 0) + sports * 0.05;
+      if (s > bestScore) {
+        bestScore = s;
+        best = pick.slice();
+      }
+      return;
+    }
+    for (let i = start; i < legs.length; i++) {
+      if (pick.some((p) => p.eventId === legs[i].eventId)) continue;
+      pick.push(legs[i]);
+      walk(i + 1, combo * legs[i].odds);
+      pick.pop();
+    }
+  };
+  walk(0, 1);
+  return best;
 }
 
 async function buildModeSlips(
@@ -650,8 +686,10 @@ async function buildModeSlips(
   count: number,
   excludeEvents: Set<string>,
   allowAi: boolean,
+  deadline?: { ok: (needMs?: number) => boolean },
 ): Promise<SureSlip[]> {
   const lim = LIMITS[mode];
+  const timeOk = (ms: number) => !deadline || deadline.ok(ms);
   const pool = buildPool(
     fixtures.filter((e) => !excludeEvents.has(e.eventId)),
     snap,
@@ -673,10 +711,36 @@ async function buildModeSlips(
     const slot = slots[slips.length] ?? slots[slots.length - 1]! + slips.length;
     const plan = plans[i] ?? (mode === "longshot" ? "x3" : "single");
 
+    if (mode === "longshot") {
+      if (!timeOk(8_000)) break;
+      const wanted = plan === "x4" ? 4 : 3;
+      // Riskiest leg of each rejected pack is dropped so the next attempt is a different combo.
+      const tried = new Set<string>();
+      for (let attempt = 0; attempt < 4 && timeOk(6_000); attempt++) {
+        const exclude = new Set([...used, ...tried]);
+        let pack: AnalyzedLeg[] | null = null;
+        for (const n of [wanted, wanted - 1, 2]) {
+          if (n < 2) continue;
+          pack = await pickCrossSportPack(pool, exclude, n, lim.maxDoubleOdds, n === 2 ? 2.8 : 3.2, true);
+          if (pack) break;
+        }
+        if (!pack) break;
+        const slip = await bookSlip(slot, pack, snap, mode, allowAi && timeOk(15_000));
+        if (slip?.code) {
+          for (const l of pack) used.add(l.eventId);
+          slips.push(slip);
+          break;
+        }
+        const riskiest = pack.slice().sort((a, b) => b.odds - a.odds)[0];
+        tried.add(riskiest.eventId);
+      }
+      continue;
+    }
+
     if (plan === "x2" || plan === "x3" || plan === "x4") {
       const n = plan === "x4" ? 4 : plan === "x3" ? 3 : 2;
       const minCombo = mode === "safe" ? 1.2 : mode === "boost" ? 2.2 : 3.2;
-      let pack = await pickCrossSportPack(
+      const pack = await pickCrossSportPack(
         pool,
         used,
         n,
@@ -684,21 +748,6 @@ async function buildModeSlips(
         minCombo,
         mode !== "safe",
       );
-      // Longshot: step down legs if 4-fold not available
-      if (!pack && mode === "longshot" && n > 2) {
-        for (const alt of [3, 2] as const) {
-          if (alt >= n) continue;
-          pack = await pickCrossSportPack(
-            pool,
-            used,
-            alt,
-            lim.maxDoubleOdds,
-            alt === 2 ? 2.8 : 3.2,
-            true,
-          );
-          if (pack) break;
-        }
-      }
       if (pack) {
         for (const l of pack) used.add(l.eventId);
         const slip = await bookSlip(slot, pack, snap, mode, allowAi);
@@ -708,11 +757,8 @@ async function buildModeSlips(
         }
         for (const l of pack) used.delete(l.eventId);
       }
-      if (mode === "longshot") continue; // no single fallback for longshot
-      // fallback single for safe/boost
     }
 
-    if (mode === "longshot") continue;
     const next = pool.find((l) => !used.has(l.eventId));
     if (!next) break;
     used.add(next.eventId);
@@ -729,7 +775,12 @@ async function buildModeSlips(
 export async function buildSureSlipsOfDay(
   count = 3,
   _history: PastOutcomeSample[] = [],
-  opts: { allowAi?: boolean; legHistory?: LegHistoryRow[]; modes?: SureMode[] } = {},
+  opts: {
+    allowAi?: boolean;
+    legHistory?: LegHistoryRow[];
+    modes?: SureMode[];
+    deadline?: { ok: (needMs?: number) => boolean };
+  } = {},
 ): Promise<SureSlip[]> {
   const now = Date.now();
   const allowAi = Boolean(opts.allowAi && process.env.OPENAI_API_KEY);
@@ -752,7 +803,7 @@ export async function buildSureSlipsOfDay(
     const fixtures = mode === "longshot" ? multiDay : near;
     // Fresh exclusion per mode so Longshot isn't starved by Safe/Larger legs
     const modeUsed = mode === "longshot" ? new Set<string>() : used;
-    const built = await buildModeSlips(mode, fixtures, snap, count, modeUsed, allowAi);
+    const built = await buildModeSlips(mode, fixtures, snap, count, modeUsed, allowAi, opts.deadline);
     for (const s of built) {
       for (const l of s.legs) used.add(l.eventId);
       slips.push(s);

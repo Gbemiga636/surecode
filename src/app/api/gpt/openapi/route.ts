@@ -147,16 +147,26 @@ export async function GET(request: Request) {
       "/api/gpt/health": {
         get: {
           operationId: "healthCheck",
-          summary: "API health check",
+          summary: "API health check. `authorized` shows whether the API key was accepted.",
           responses: {
             "200": {
               description: "OK",
-              content: { "application/json": { schema: obj({ ok: { type: "boolean" } }) } },
+              content: {
+                "application/json": {
+                  schema: obj({
+                    ok: { type: "boolean" },
+                    authorized: { type: "boolean" },
+                    authHint: { type: "string" },
+                  }),
+                },
+              },
             },
           },
+          security: secured,
         },
       },
     },
+    security: secured,
     components: {
       schemas: {},
       securitySchemes: {

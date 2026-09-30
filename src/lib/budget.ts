@@ -8,7 +8,8 @@ export function crawlBudgetMs(): number {
   if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
 
   // Vercel sets VERCEL=1
-  if (process.env.VERCEL === "1") return 45_000;
+  // /api/crawl sets maxDuration 120s; leave headroom for DB writes after the budget.
+  if (process.env.VERCEL === "1") return 100_000;
   if (process.env.NETLIFY === "true" || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     return 20_000;
   }

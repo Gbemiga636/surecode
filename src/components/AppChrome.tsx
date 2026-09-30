@@ -184,13 +184,8 @@ export function AppChrome({
         <div className="topbar">
           <div className="topbar-titles">
             <h1>{meta.title}</h1>
-            <div className="sub">{meta.subtitle}</div>
           </div>
           <div className="top-right">
-            <span className="chip chip-live">
-              <span className="live-dot" />
-              SportyBet NG
-            </span>
             <button
               type="button"
               className="hamburger-btn"

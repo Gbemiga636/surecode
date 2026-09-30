@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Icon } from "@/components/Icons";
 
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
@@ -14,7 +15,8 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
     }
   }
   return (
-    <button type="button" onClick={copy} className="sc-btn-ghost text-xs">
+    <button type="button" onClick={copy} className={`sc-btn-ghost text-xs${done ? " is-copied" : ""}`}>
+      <Icon name={done ? "check" : "copy"} size={13} />
       {done ? "Copied" : label}
     </button>
   );
