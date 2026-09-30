@@ -79,7 +79,28 @@ export default async function HomePage({
     .eq("day", day)
     .order("slot", { ascending: true });
 
-  const rows = (codes ?? []) as SureHomeCode[];
+  let rows = (codes ?? []) as SureHomeCode[];
+  let boardDay = day;
+  // Between Lagos midnight and the first crawl today's board is empty; keep the last one visible.
+  if (!rows.length) {
+    const { data: last } = await supabase
+      .from(T.sureCodes)
+      .select("day")
+      .lt("day", day)
+      .order("day", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (last?.day) {
+      const { data: prev } = await supabase
+        .from(T.sureCodes)
+        .select("*")
+        .eq("day", last.day)
+        .order("slot", { ascending: true });
+      rows = (prev ?? []) as SureHomeCode[];
+      boardDay = String(last.day);
+    }
+  }
+  const stale = boardDay !== day && rows.length > 0;
 
   const legs = rows.flatMap((r) => r.legs ?? []);
   const ticker: TickerItem[] = legs.slice(0, 24).map((l) => ({
@@ -136,9 +157,19 @@ export default async function HomePage({
       <HeroSlider slides={PROMOS} variant="promo" intervalMs={5500} />
 
       <div id="board">
+        {stale && (
+          <div className="dh-stale" role="status">
+            <Icon name="clock" size={18} />
+            <p>
+              <strong>Today’s board is being built.</strong> Showing the latest codes from {boardDay}; some
+              matches may already have started. Fresh codes land shortly after midnight and again in the
+              evening.
+            </p>
+          </div>
+        )}
         <SureHomeClient
           key={initialMode}
-          day={day}
+          day={boardDay}
           codes={rows}
           initialMode={initialMode}
           fromUrl={Boolean(mode)}
