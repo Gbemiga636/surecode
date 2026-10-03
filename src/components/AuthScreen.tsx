@@ -5,13 +5,17 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Icon, type IconName } from "@/components/Icons";
+import { Tilt } from "@/components/Tilt";
+import { Typewriter } from "@/components/Typewriter";
+import { marketingFonts } from "@/lib/fonts";
+import "@/app/marketing.css";
 
 type Mode = "login" | "signup";
 
 const FEATURES: { icon: IconName; title: string; body: string; tone: string }[] = [
   { icon: "shield", title: "Sure codes daily", body: "Safe, Larger and Longshot slips, refreshed twice a day.", tone: "g" },
   { icon: "heart", title: "Track what you like", body: "Like any code and see if it won, lost, and why.", tone: "r" },
-  { icon: "wallet", title: "₦100k demo wallet", body: "Practice staking with virtual money. Resets daily.", tone: "y" },
+  { icon: "wallet", title: "₦100k demo wallet", body: "Practise staking with virtual money. Resets daily.", tone: "o" },
 ];
 
 const SAMPLE_LEGS: { sport: IconName; match: string; pick: string; odds: string }[] = [
@@ -19,6 +23,8 @@ const SAMPLE_LEGS: { sport: IconName; match: string; pick: string; odds: string 
   { sport: "basketball", match: "Lakers v Suns", pick: "Lakers to win", odds: "1.48" },
   { sport: "tennis", match: "Sinner v Ruud", pick: "Sinner to win", odds: "1.30" },
 ];
+
+const PHRASES = ["Every matchday.", "Across five sports.", "Tracked leg by leg."];
 
 function strength(pw: string): { score: number; label: string } {
   let s = 0;
@@ -72,68 +78,71 @@ export function AuthScreen({ mode }: { mode: Mode }) {
   }
 
   return (
-    <main className="ax">
-      <div className="ax-bg" aria-hidden>
-        <span className="ax-orb ax-orb-1" />
-        <span className="ax-orb ax-orb-2" />
-        <span className="ax-pitch" />
+    <main className={`mk au ${marketingFonts}`}>
+      <div className="mk-mesh" aria-hidden>
+        <span className="mk-blob mk-blob-1" />
+        <span className="mk-blob mk-blob-2" />
+        <span className="mk-blob mk-blob-3" />
+        <span className="mk-grid" />
       </div>
 
-      <section className="ax-show">
-        <Link href="/" className="ax-brand">
-          <span className="ax-mark">
-            <Icon name="target" size={20} />
-          </span>
-          SureCode
-        </Link>
+      <Link href="/" className="mk-brand au-brand">
+        <span className="mk-logo" aria-hidden>
+          <Icon name="target" size={16} />
+        </span>
+        SureCode
+      </Link>
 
-        <div className="ax-copy">
-          <p className="ax-kicker">
+      <section className="au-show">
+        <div className="au-copy mk-in mk-in-1">
+          <p className="mk-pill">
             <Icon name="spark" size={13} /> AI-built multi-sport codes
           </p>
-          <h1 className="ax-title">
+          <h1 className="au-title">
             Smarter slips.
-            <span className="ax-title-grad">Every matchday.</span>
+            <span className="mk-type">
+              <Typewriter phrases={PHRASES} />
+            </span>
           </h1>
-          <p className="ax-lead">
-            Cross-sport codes screened by AI, results tracked leg by leg, and a demo wallet to
-            practise before you stake.
+          <p className="au-lead">
+            Cross-sport codes screened by AI, results tracked leg by leg, and a demo wallet to practise
+            before you stake.
           </p>
         </div>
 
-        <div className="ax-ticket" aria-label="Sample slip">
-          <div className="ax-ticket-head">
-            <span className="ax-ticket-lane">
-              <Icon name="shield" size={13} /> Safe lane
+        <Tilt className="au-ticket mk-in mk-in-2" max={12}>
+          <div className="au-ticket-head">
+            <span className="mk-badge">
+              <Icon name="shield" size={12} /> Safe lane
             </span>
-            <span className="ax-ticket-tag">Sample slip</span>
+            <span className="au-ticket-tag">Sample slip</span>
           </div>
-          <p className="ax-ticket-code">SC7K2Q</p>
-          <ul className="ax-ticket-legs">
+          <p className="au-ticket-code">SC7K2Q</p>
+          <ul className="mk-pv-legs">
             {SAMPLE_LEGS.map((l) => (
               <li key={l.match}>
-                <span className="ax-leg-ic">
-                  <Icon name={l.sport} size={14} />
+                <span className="mk-leg-ic">
+                  <Icon name={l.sport} size={13} />
                 </span>
-                <span className="ax-leg-body">
+                <span className="mk-leg-body">
                   <strong>{l.match}</strong>
                   <span>{l.pick}</span>
                 </span>
-                <span className="ax-leg-odds">{l.odds}</span>
+                <span className="mk-leg-odds">{l.odds}</span>
               </li>
             ))}
           </ul>
-          <div className="ax-ticket-foot">
+          <div className="mk-pv-foot">
             <span>Total odds</span>
             <strong>2.35</strong>
           </div>
-        </div>
+        </Tilt>
 
-        <ul className="ax-feats">
+        <ul className="au-feats">
           {FEATURES.map((f, i) => (
-            <li key={f.title} className={`ax-feat ax-feat-${f.tone}`} style={{ animationDelay: `${150 + i * 90}ms` }}>
-              <span className="ax-feat-ic">
-                <Icon name={f.icon} size={18} />
+            <li key={f.title} className={`au-feat mk-in`} style={{ animationDelay: `${260 + i * 90}ms` }}>
+              <span className={`au-feat-ic mk-tone-${f.tone}`}>
+                <Icon name={f.icon} size={17} />
               </span>
               <span>
                 <strong>{f.title}</strong>
@@ -144,9 +153,9 @@ export function AuthScreen({ mode }: { mode: Mode }) {
         </ul>
       </section>
 
-      <section className="ax-panel">
-        <div className="ax-card">
-          <nav className="ax-switch" aria-label="Account">
+      <section className="au-panel">
+        <div className="au-card mk-in mk-in-1">
+          <nav className="au-switch" aria-label="Account">
             <Link href="/login" className={isLogin ? "is-on" : ""} aria-current={isLogin ? "page" : undefined}>
               Log in
             </Link>
@@ -155,18 +164,15 @@ export function AuthScreen({ mode }: { mode: Mode }) {
             </Link>
           </nav>
 
-          <span className="ax-card-ic">
-            <Icon name={isLogin ? "lock" : "star"} size={22} />
-          </span>
-          <h2 className="ax-card-title">{isLogin ? "Welcome back" : "Create your account"}</h2>
-          <p className="ax-card-sub">
-            {isLogin ? "Log in to open today’s Sure codes." : "Free to join. Your demo wallet is ready on day one."}
+          <h2 className="au-card-title">{isLogin ? "Welcome back" : "Create your account"}</h2>
+          <p className="au-card-sub">
+            {isLogin ? "Log in to open today’s Sure codes." : "Your demo wallet is ready on day one."}
           </p>
 
-          <form onSubmit={onSubmit} className="ax-form">
-            <label className="ax-field">
-              <span className="ax-label">Email</span>
-              <span className="ax-input">
+          <form onSubmit={onSubmit} className="au-form">
+            <label className="au-field">
+              <span className="au-label">Email</span>
+              <span className="au-input">
                 <Icon name="mail" size={17} />
                 <input
                   type="email"
@@ -179,9 +185,9 @@ export function AuthScreen({ mode }: { mode: Mode }) {
               </span>
             </label>
 
-            <label className="ax-field">
-              <span className="ax-label">Password</span>
-              <span className="ax-input">
+            <label className="au-field">
+              <span className="au-label">Password</span>
+              <span className="au-input">
                 <Icon name="lock" size={17} />
                 <input
                   type={show ? "text" : "password"}
@@ -194,7 +200,7 @@ export function AuthScreen({ mode }: { mode: Mode }) {
                 />
                 <button
                   type="button"
-                  className="ax-eye"
+                  className="au-eye"
                   onClick={() => setShow((s) => !s)}
                   aria-label={show ? "Hide password" : "Show password"}
                 >
@@ -204,39 +210,37 @@ export function AuthScreen({ mode }: { mode: Mode }) {
             </label>
 
             {!isLogin && password && (
-              <div className={`ax-meter ax-meter-${pw.score}`} aria-live="polite">
-                <span className="ax-meter-bars">
+              <div className={`au-meter au-meter-${pw.score}`} aria-live="polite">
+                <span className="au-meter-bars">
                   {[1, 2, 3, 4].map((n) => (
                     <span key={n} className={n <= pw.score ? "on" : ""} />
                   ))}
                 </span>
-                <span className="ax-meter-label">{pw.label}</span>
+                <span className="au-meter-label">{pw.label}</span>
               </div>
             )}
 
             {error && (
-              <p className="ax-alert ax-alert-bad" role="alert">
+              <p className="au-alert au-alert-bad" role="alert">
                 <Icon name="close" size={15} /> {error}
               </p>
             )}
             {info && (
-              <p className="ax-alert ax-alert-ok" role="status">
+              <p className="au-alert au-alert-ok" role="status">
                 <Icon name="mail" size={15} /> {info}
               </p>
             )}
 
-            <button type="submit" className="ax-submit" disabled={loading}>
+            <button type="submit" className="mk-btn mk-btn-lg mk-btn-shine au-submit" disabled={loading} aria-busy={loading}>
+              {loading && <span className="mk-spinner" aria-hidden />}
               {loading ? (isLogin ? "Signing in…" : "Creating account…") : isLogin ? "Log in" : "Create account"}
-              {!loading && <Icon name="arrowRight" size={18} />}
+              {!loading && <Icon name="arrowRight" size={18} className="mk-arrow" />}
             </button>
           </form>
 
-          <ul className="ax-trust">
+          <ul className="au-trust">
             <li>
               <Icon name="lock" size={14} /> Secure sign-in
-            </li>
-            <li>
-              <Icon name="wallet" size={14} /> No card needed
             </li>
             <li>
               <Icon name="shield" size={14} /> 18+ only
@@ -244,7 +248,7 @@ export function AuthScreen({ mode }: { mode: Mode }) {
           </ul>
         </div>
 
-        <p className="ax-alt">
+        <p className="au-alt">
           {isLogin ? (
             <>
               New here? <Link href="/signup">Create an account</Link>
@@ -255,7 +259,7 @@ export function AuthScreen({ mode }: { mode: Mode }) {
             </>
           )}
         </p>
-        <Link href="/" className="ax-back">
+        <Link href="/" className="au-back">
           <Icon name="chevronLeft" size={14} /> Back to home
         </Link>
       </section>

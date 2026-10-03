@@ -5971,3 +5971,95 @@ svg.hb-ic {
     animation: none;
   }
 }
+
+/* ================================================================
+   Mobile bottom navigation (dashboard only)
+   ================================================================ */
+.bottom-nav {
+  display: none;
+}
+@media (max-width: 860px) {
+  .bottom-nav {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 16;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    height: 64px;
+    padding: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 18px;
+    background: rgba(15, 20, 26, 0.92);
+    backdrop-filter: saturate(160%) blur(14px);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    box-shadow: 0 12px 32px rgba(15, 20, 26, 0.28);
+    animation: bn-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .bn-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: #8d98a4;
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .bn-item svg.bn-ic {
+    width: 20px;
+    height: 20px;
+    color: currentColor;
+    transition: transform 0.15s ease;
+  }
+  .bn-item:active svg.bn-ic {
+    transform: scale(0.88);
+  }
+  .bn-item.on {
+    background: #1a232e;
+    color: #fff;
+  }
+  .bn-item.on svg.bn-ic {
+    color: #16c47a;
+  }
+  .bn-item:focus-visible {
+    outline: 2px solid #16c47a;
+    outline-offset: 2px;
+  }
+  .content {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+  .lk-bar,
+  .lk-toast {
+    bottom: calc(86px + env(safe-area-inset-bottom));
+  }
+  .lk-toast-up {
+    bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+}
+@keyframes bn-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bottom-nav {
+    animation: none;
+  }
+}

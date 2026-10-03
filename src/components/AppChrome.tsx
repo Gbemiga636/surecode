@@ -37,6 +37,13 @@ const GROUPS: {
   },
 ];
 
+const TABS: { href: string; label: string; icon: IconName }[] = [
+  { href: "/home", label: "Sure", icon: "shield" },
+  { href: "/codes", label: "Codes", icon: "dashboard" },
+  { href: "/liked", label: "Liked", icon: "heart" },
+  { href: "/demo", label: "Wallet", icon: "wallet" },
+];
+
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/home": {
     title: "Sure codes",
@@ -201,6 +208,34 @@ export function AppChrome({
         </div>
         <div className="content">{children}</div>
       </div>
+
+      <nav className="bottom-nav" aria-label="Quick navigation">
+        {TABS.map((t) => {
+          const on = path === t.href || path.startsWith(t.href + "/");
+          return (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={`bn-item ${on ? "on" : ""}`}
+              aria-current={on ? "page" : undefined}
+            >
+              <Icon name={t.icon} size={20} className="bn-ic" />
+              <span>{t.label}</span>
+            </Link>
+          );
+        })}
+        <button
+          type="button"
+          className={`bn-item ${open ? "on" : ""}`}
+          onClick={() => setOpen(true)}
+          aria-label="More pages"
+          aria-controls="sidebar"
+          aria-expanded={open}
+        >
+          <Icon name="menu" size={20} className="bn-ic" />
+          <span>More</span>
+        </button>
+      </nav>
     </div>
   );
 }
