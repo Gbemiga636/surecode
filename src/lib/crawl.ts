@@ -9,6 +9,7 @@ import {
 import { fetchFinalScore, settlePick, type BookableLeg } from "./sporty";
 import type { LegHistoryRow } from "./learning";
 import { settleLikedCodes } from "./liked";
+import { crawlLogSlips, runPredictionLog } from "./prediction-log";
 import {
   buildPlentyCodes,
   getAnalysisBoard,
@@ -180,6 +181,8 @@ export async function runSureCrawl(): Promise<CrawlResult> {
   let settledTotal = 0;
   let historyLegs = 0;
   let slips: Awaited<ReturnType<typeof buildSureSlipsOfDay>> = [];
+  const loggedPlenty: Awaited<ReturnType<typeof buildPlentyCodes>> = [];
+  let loggedPreds: Awaited<ReturnType<typeof getPredictions>> = [];
 
   try {
     // Sure slips first — settling can eat the whole serverless budget.
@@ -266,7 +269,10 @@ export async function runSureCrawl(): Promise<CrawlResult> {
             },
             { onConflict: "day,code" },
           );
-          if (!error) plenty++;
+          if (!error) {
+            plenty++;
+            loggedPlenty.push(pack);
+          }
         }
       } catch (e) {
         console.warn("[crawl] plenty codes:", fmtErr(e));
@@ -295,6 +301,7 @@ export async function runSureCrawl(): Promise<CrawlResult> {
           { id: "combos", payload: { combos } },
           { id: "analysis", payload: { board } },
         ]);
+        loggedPreds = preds;
       } catch (e) {
         console.warn("[crawl] pick pools:", fmtErr(e));
       }
@@ -362,6 +369,18 @@ export async function runSureCrawl(): Promise<CrawlResult> {
       summary: msg,
       slips: [],
     };
+  } finally {
+    // Audit log only — runPredictionLog never throws and stays inside the time budget.
+    await runPredictionLog(
+      () =>
+        crawlLogSlips({
+          day,
+          sure: slips.filter((s) => s.code),
+          plenty: loggedPlenty,
+          predictions: loggedPreds,
+        }),
+      deadline.left() - 1_500,
+    );
   }
 }
 

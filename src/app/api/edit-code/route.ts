@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { editLongCode } from "@/lib/edit-code";
 import { T } from "@/lib/db";
+import { slipToLog } from "@/lib/prediction-log";
+import { logPredictionsAfterResponse } from "@/lib/prediction-log-after";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -43,6 +45,10 @@ export async function POST(request: Request) {
         legs: alt.legs,
       });
     }
+
+    logPredictionsAfterResponse(() =>
+      result.alts.flatMap((a) => slipToLog("edit-code", a, `edit-code:${a.label}`) ?? []),
+    );
 
     return NextResponse.json(result, {
       status: result.ok ? 200 : 422,

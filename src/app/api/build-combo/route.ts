@@ -6,6 +6,8 @@ import {
   type BuilderRequest,
 } from "@/lib/build-combo";
 import { T } from "@/lib/db";
+import { slipToLog } from "@/lib/prediction-log";
+import { logPredictionsAfterResponse } from "@/lib/prediction-log-after";
 
 export const maxDuration = 90;
 export const dynamic = "force-dynamic";
@@ -48,6 +50,10 @@ export async function POST(request: Request) {
         legs: slip.legs,
       });
     }
+
+    logPredictionsAfterResponse(() =>
+      result.slips.flatMap((s) => slipToLog("builder", s, `builder:${conditions.join("+")}`) ?? []),
+    );
 
     return NextResponse.json(result, {
       status: result.ok || result.slips.length ? 200 : 422,

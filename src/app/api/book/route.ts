@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { bookPicks, type AppPick } from "@/lib/picks";
 import { T } from "@/lib/db";
+import { slipToLog } from "@/lib/prediction-log";
+import { logPredictionsAfterResponse } from "@/lib/prediction-log-after";
 
 export const maxDuration = 30;
 export const dynamic = "force-dynamic";
@@ -44,6 +46,11 @@ export async function POST(request: Request) {
       total_odds: Number(booked.totalOdds.toFixed(4)),
       origin: String(body.origin ?? "manual").slice(0, 40),
       legs: booked.legs,
+    });
+
+    logPredictionsAfterResponse(() => {
+      const entry = slipToLog("book", booked, String(body.origin ?? "manual"));
+      return entry ? [entry] : [];
     });
 
     return NextResponse.json({

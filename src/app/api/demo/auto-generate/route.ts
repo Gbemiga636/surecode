@@ -4,6 +4,7 @@ import { ensureDemoWallet } from "@/lib/demo";
 import { T } from "@/lib/db";
 import { getExpertPicks, getValuePicks } from "@/lib/picks";
 import { PICKS } from "@/lib/sporty";
+import { logPredictionsAfterResponse } from "@/lib/prediction-log-after";
 
 export async function POST() {
   const supabase = await createClient();
@@ -69,6 +70,30 @@ export async function POST() {
     .from(T.demoWallets)
     .update({ balance, staked })
     .eq("user_id", user.id);
+
+  logPredictionsAfterResponse(() => {
+    const day = new Date().toISOString().slice(0, 10);
+    return tiers
+      .filter((t) => placed.includes(t.label))
+      .map((t) => ({
+        source: "demo-auto" as const,
+        origin: `AUTO-${t.label}`,
+        dedupeScope: `${day}:${t.label}`,
+        slipOdds: t.picks.reduce((a, p) => a * Number(p.odds), 1),
+        slipConfidence: t.picks.reduce((a, p) => a * (Number(p.confidence) || 0), 1),
+        legs: t.picks.map((p) => ({
+          eventId: p.eventId,
+          home: p.home,
+          away: p.away,
+          league: p.league,
+          pickCode: p.pickCode,
+          pickLabel: p.pick,
+          odds: p.odds,
+          kickoff: p.kickoff,
+          confidence: p.confidence,
+        })),
+      }));
+  });
 
   return NextResponse.json({ ok: true, placed });
 }
