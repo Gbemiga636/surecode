@@ -6063,3 +6063,165 @@ svg.hb-ic {
     animation: none;
   }
 }
+
+/* ================================================================
+   Sure board: pick games across codes → one combined code
+   ================================================================ */
+.cb-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px dashed rgba(10, 143, 92, 0.35);
+  border-radius: 14px;
+  background: rgba(10, 143, 92, 0.05);
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.cb-hint svg {
+  flex: none;
+  color: var(--accent);
+}
+.cb-slip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 20px 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+@media (min-width: 640px) {
+  .cb-slip-head {
+    padding-inline: 24px;
+  }
+}
+.cb-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.cb-all:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+.cb-all.is-on {
+  border-color: var(--accent);
+  background: rgba(10, 143, 92, 0.08);
+  color: var(--accent-deep);
+}
+.cb-leg {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  transition: background 0.15s ease;
+}
+.cb-leg.is-on {
+  background: rgba(10, 143, 92, 0.07);
+}
+.cb-pick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid rgba(16, 19, 23, 0.22);
+  border-radius: 9px;
+  background: #fff;
+  color: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease,
+    box-shadow 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.cb-pick:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: rgba(10, 143, 92, 0.45);
+}
+.cb-pick:active:not(:disabled) {
+  transform: scale(0.9);
+}
+.cb-pick.is-on {
+  border-color: #0a8f5c;
+  background: #0a8f5c;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(10, 143, 92, 0.3);
+}
+.cb-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.cb-pick:focus-visible,
+.cb-all:focus-visible {
+  outline: 2px solid #16c47a;
+  outline-offset: 2px;
+}
+.cb-odds {
+  margin-left: 2px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: #6ee7b7;
+}
+.cb-bar.is-raised {
+  bottom: 82px;
+}
+.cb-toast.lk-toast-up {
+  bottom: 82px;
+}
+.cb-skipped {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(200, 30, 58, 0.06);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.cb-skipped p {
+  margin: 0 0 4px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.cb-skipped ul {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+.cb-done {
+  animation: lp-rise 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (max-width: 860px) {
+  .cb-bar.is-raised,
+  .cb-toast.lk-toast-up {
+    bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-pick,
+  .cb-all,
+  .cb-leg {
+    transition: none;
+  }
+  .cb-done {
+    animation: none;
+  }
+}

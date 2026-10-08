@@ -24,6 +24,7 @@ import {
   type LegHistoryRow,
 } from "./learning";
 import { modeForSlot, slotsForMode, type SureMode } from "./sure-mode";
+import { traceCandidate, traceSelected, tracing } from "./candidate-trace";
 
 export type { SureMode };
 export { modeForSlot, slotsForMode };
@@ -133,6 +134,73 @@ function deVig1x2(ev: SbEvent): { home: number; draw: number; away: number } | n
   return { home: ih / s, draw: id / s, away: ia / s };
 }
 
+/** De-vigged market probability for a pick when the full market is known (audit only). */
+function fairProbFor(ev: SbEvent, pickCode: string): number | null {
+  const two = (a?: number, b?: number) => (a && b ? 1 / a / (1 / a + 1 / b) : null);
+  const o = ev.outcomes;
+  switch (pickCode) {
+    case "BBH":
+      return two(o.BBH, o.BBA);
+    case "BBA":
+      return two(o.BBA, o.BBH);
+    case "TNH":
+      return two(o.TNH, o.TNA);
+    case "TNA":
+      return two(o.TNA, o.TNH);
+  }
+  const p = deVig1x2(ev);
+  if (!p) {
+    if (pickCode === "1" && !o.X) return two(o["1"], o["2"]);
+    if (pickCode === "2" && !o.X) return two(o["2"], o["1"]);
+    return null;
+  }
+  switch (pickCode) {
+    case "1":
+      return p.home;
+    case "2":
+      return p.away;
+    case "DC1X":
+      return p.home + p.draw;
+    case "DCX2":
+      return p.away + p.draw;
+    case "DNBH":
+      return p.home / (p.home + p.away);
+    case "DNBA":
+      return p.away / (p.home + p.away);
+    default:
+      return null;
+  }
+}
+
+/** Audit hook: record why a candidate was dropped. Always returns null; never throws. */
+function auditReject(ev: SbEvent, mode: SureMode, pickCode: string, odds: number, reason: string, score?: number): null {
+  try {
+    if (tracing()) {
+      traceCandidate(ev, mode, pickCode, odds, "analysis", reason, {
+        score: score ?? null,
+        fairProb: fairProbFor(ev, pickCode),
+      });
+    }
+  } catch {
+    /* auditing never affects the engine */
+  }
+  return null;
+}
+
+/** Audit hook: record a candidate that passed analysis. Never throws. */
+function auditPass(ev: SbEvent, mode: SureMode, pickCode: string, odds: number, score: number): void {
+  try {
+    if (tracing()) {
+      traceCandidate(ev, mode, pickCode, odds, "analysis", "passed analysis; not reached pool", {
+        score,
+        fairProb: fairProbFor(ev, pickCode),
+      });
+    }
+  } catch {
+    /* auditing never affects the engine */
+  }
+}
+
 function moneylineFav(
   ev: SbEvent,
   lim: ModeLimits,
@@ -180,7 +248,9 @@ function analyzeFootballPick(
   if (!meta) return null;
   const odds = ev.outcomes[pickCode];
   if (!odds || odds < lim.minOdds || odds > lim.maxOdds) return null;
-  if (mode === "safe" && impliedProb(odds) < lim.minImplied && pickCode !== "O05") return null;
+  const no = (reason: string, score?: number) => auditReject(ev, mode, pickCode, odds, reason, score);
+  if (mode === "safe" && impliedProb(odds) < lim.minImplied && pickCode !== "O05")
+    return no("safe: implied probability below minimum");
 
   const probs = deVig1x2(ev);
   const analysis: string[] = [];
@@ -195,52 +265,55 @@ function analyzeFootballPick(
     );
 
     if (["DC1X", "DNBH", "HO05", "1"].includes(pickCode)) {
-      if (favSide !== "home" || probs.home < homeFloor) return null;
+      if (favSide !== "home" || probs.home < homeFloor)
+        return no("home pick: home not a clear favourite / below probability floor");
       analysis.push(`Home favourite edge ${(probs.home - probs.away).toFixed(2)}`);
     }
     if (["DCX2", "DNBA", "AO05", "2"].includes(pickCode)) {
-      if (favSide !== "away" || probs.away < homeFloor) return null;
+      if (favSide !== "away" || probs.away < homeFloor)
+        return no("away pick: away not a clear favourite / below probability floor");
       analysis.push(`Away favourite edge ${(probs.away - probs.home).toFixed(2)}`);
     }
-    if (pickCode === "O05" && mode === "safe" && odds > 1.28) return null;
-    if (pickCode === "O05" && mode !== "safe") return null; // O05 only in safe
+    if (pickCode === "O05" && mode === "safe" && odds > 1.28) return no("O05: price above 1.28 cap");
+    if (pickCode === "O05" && mode !== "safe") return no("O05: only allowed in safe"); // O05 only in safe
     if (pickCode === "1HO05") {
-      if (mode === "longshot") return null;
-      if (odds > (mode === "safe" ? 1.32 : 1.55)) return null;
+      if (mode === "longshot") return no("1HO05: not allowed in longshot");
+      if (odds > (mode === "safe" ? 1.32 : 1.55)) return no("1HO05: price above cap");
       analysis.push("1st-half Over 0.5 — high-hit period market");
     }
     if (pickCode === "1HDC1X") {
-      if (favSide !== "home" || probs.home < 0.45) return null;
+      if (favSide !== "home" || probs.home < 0.45) return no("1HDC1X: home not favourite / below 45%");
       analysis.push("1st-half double chance on home favourite");
     }
     if (pickCode === "1HDCX2") {
-      if (favSide !== "away" || probs.away < 0.45) return null;
+      if (favSide !== "away" || probs.away < 0.45) return no("1HDCX2: away not favourite / below 45%");
       analysis.push("1st-half double chance on away favourite");
     }
     if (pickCode === "O15") {
-      if (mode === "safe" && (odds > 1.4 || probs.draw > 0.33)) return null;
-      if (mode === "boost" && odds > 2.2) return null;
-      if (mode === "longshot" && (odds > 2.4 || probs.draw > 0.32)) return null;
+      if (mode === "safe" && (odds > 1.4 || probs.draw > 0.33)) return no("O15: price or draw-probability filter");
+      if (mode === "boost" && odds > 2.2) return no("O15: price above boost cap");
+      if (mode === "longshot" && (odds > 2.4 || probs.draw > 0.32))
+        return no("O15: price or draw-probability filter");
       analysis.push("Goals market aligned with match tempo");
     }
     if (pickCode === "O25") {
-      if (mode === "safe") return null;
-      if (probs.draw > 0.3) return null;
+      if (mode === "safe") return no("O25: not allowed in safe");
+      if (probs.draw > 0.3) return no("O25: draw probability above 30%");
       analysis.push("Over 2.5 — open game profile");
     }
     if (pickCode === "BTTSY") {
-      if (mode === "safe") return null;
-      if (probs.draw > 0.34) return null;
+      if (mode === "safe") return no("BTTSY: not allowed in safe");
+      if (probs.draw > 0.34) return no("BTTSY: draw probability above 34%");
       analysis.push("BTTS Yes — both sides expected to score");
     }
     if (
       favSide === "coin" &&
       !["O05", "O15", "O25", "BTTSY", "1HO05"].includes(pickCode)
     ) {
-      return null;
+      return no("no clear favourite (coin-flip match)");
     }
   } else if (!["O05", "O15"].includes(pickCode)) {
-    return null;
+    return no("no full 1X2 market to de-vig");
   }
 
   const leg: BookableLeg = {
@@ -261,7 +334,7 @@ function analyzeFootballPick(
   };
 
   const pickStat = snap.byPick.find((p) => p.pickCode === pickCode);
-  if (snap.avoidMarkets.includes(pickCode) && mode === "safe") return null;
+  if (snap.avoidMarkets.includes(pickCode) && mode === "safe") return no("safe: market on learned avoid list");
   if (
     mode === "safe" &&
     snap.eliteMarkets.length >= 2 &&
@@ -269,10 +342,10 @@ function analyzeFootballPick(
     !["O05", "DC1X", "DCX2", "HO05", "AO05"].includes(pickCode)
   ) {
     // When training is mature, stick to elite + core high-hit markets
-    return null;
+    return no("safe: not an elite or core market");
   }
   if (pickStat && pickStat.plays >= 12 && pickStat.smoothed < (mode === "safe" ? 0.58 : 0.5)) {
-    return null;
+    return no("learned hit rate for this market below floor");
   }
 
   let score = scoreLeg(leg, snap);
@@ -291,7 +364,8 @@ function analyzeFootballPick(
   }
   if (probs && favSide === "home") score += probs.home * 0.9;
   if (probs && favSide === "away") score += probs.away * 0.9;
-  if (score < lim.minScore) return null;
+  if (score < lim.minScore) return no("engine score below minimum", score);
+  auditPass(ev, mode, pickCode, odds, score);
 
   analysis.push(`Market ${pickCode} @ ${odds.toFixed(2)} (~${Math.round(leg.implied * 100)}% implied)`);
   if (pickStat && pickStat.plays >= 6) {
@@ -321,7 +395,8 @@ function analyzeMoneyline(
     fav.side === "home"
       ? ev.outcomes.BBA || ev.outcomes.TNA || ev.outcomes["2"]
       : ev.outcomes.BBH || ev.outcomes.TNH || ev.outcomes["1"];
-  if (other && other / fav.odds < (mode === "safe" ? 1.15 : 1.08)) return null;
+  if (other && other / fav.odds < (mode === "safe" ? 1.15 : 1.08))
+    return auditReject(ev, mode, fav.code, fav.odds, "moneyline: favourite margin over opponent too thin");
 
   const leg: BookableLeg = {
     eventId: ev.eventId,
@@ -344,7 +419,9 @@ function analyzeMoneyline(
   if (fav.odds <= 1.25) score += 0.55;
   if (mode === "boost" && fav.odds >= 1.5) score += 0.2;
   if (mode === "longshot" && fav.odds >= 1.45) score += 0.35;
-  if (score < lim.minScore) return null;
+  if (score < lim.minScore)
+    return auditReject(ev, mode, fav.code, fav.odds, "engine score below minimum", score);
+  auditPass(ev, mode, fav.code, fav.odds, score);
 
   const modeNote =
     mode === "safe"
@@ -421,22 +498,44 @@ function buildPool(
   const sportCap = mode === "longshot" ? 4 : mode === "boost" ? 3 : 2;
   const poolCap = mode === "longshot" ? 20 : 14;
 
+  const poolNote = (leg: AnalyzedLeg, reason: string, onlyIfStage?: "analysis") => {
+    try {
+      if (tracing()) traceCandidate(leg, mode, leg.pickCode, leg.odds, "pool", reason, { onlyIfStage });
+    } catch {
+      /* auditing never affects the engine */
+    }
+  };
+
   for (const leg of all) {
-    if (usedEvents.has(leg.eventId)) continue;
+    if (usedEvents.has(leg.eventId)) {
+      poolNote(leg, "pool: event already in pool via another market");
+      continue;
+    }
     const best = all.filter((x) => x.eventId === leg.eventId).sort((a, b) => b.score - a.score)[0];
-    if (best.pickCode !== leg.pickCode) continue;
+    if (best.pickCode !== leg.pickCode) {
+      poolNote(leg, "pool: not the best-scoring market for this event");
+      continue;
+    }
 
     const sp = leg.sport || "football";
-    if ((sportCount.get(sp) ?? 0) >= sportCap) continue;
+    if ((sportCount.get(sp) ?? 0) >= sportCap) {
+      poolNote(leg, "pool: sport cap reached");
+      continue;
+    }
     const lg = leg.league || "unknown";
-    if ((leagueCount.get(lg) ?? 0) >= 2) continue;
+    if ((leagueCount.get(lg) ?? 0) >= 2) {
+      poolNote(leg, "pool: league cap reached");
+      continue;
+    }
 
     usedEvents.add(leg.eventId);
     sportCount.set(sp, (sportCount.get(sp) ?? 0) + 1);
     leagueCount.set(lg, (leagueCount.get(lg) ?? 0) + 1);
     pool.push(leg);
+    poolNote(leg, "in pool; not used in a booked slip");
     if (pool.length >= poolCap) break;
   }
+  if (tracing()) for (const leg of all) poolNote(leg, "pool: pool already full", "analysis");
   return pool;
 }
 
@@ -551,10 +650,18 @@ async function bookSlip(
   allowAi: boolean,
 ): Promise<SureSlip | null> {
   if (!legs.length) return null;
+  const drop = (reason: string): null => {
+    try {
+      if (tracing()) for (const l of legs) traceCandidate(l, mode, l.pickCode, l.odds, "slip", reason);
+    } catch {
+      /* auditing never affects the engine */
+    }
+    return null;
+  };
   const lim = LIMITS[mode];
-  if (legs.length > 1 && !lim.allowDoubles) return null;
+  if (legs.length > 1 && !lim.allowDoubles) return drop("slip: multi-leg not allowed");
   const totalOdds = legs.reduce((a, l) => a * l.odds, 1);
-  if (legs.length >= 2 && totalOdds > lim.maxDoubleOdds) return null;
+  if (legs.length >= 2 && totalOdds > lim.maxDoubleOdds) return drop("slip: combined odds above cap");
   const confidence = legs.reduce((a, l) => a * l.implied, 1);
   if (
     mode === "safe" &&
@@ -563,13 +670,13 @@ async function bookSlip(
     legs[0].pickCode !== "O05" &&
     legs[0].pickCode !== "1HO05"
   )
-    return null;
-  if (mode === "safe" && legs.length >= 2 && confidence < 0.45) return null;
-  if (mode === "boost" && legs.length >= 2 && confidence < 0.26) return null;
+    return drop("slip: single below safe probability floor");
+  if (mode === "safe" && legs.length >= 2 && confidence < 0.45) return drop("slip: combined probability below floor");
+  if (mode === "boost" && legs.length >= 2 && confidence < 0.26) return drop("slip: combined probability below floor");
   if (mode === "longshot") {
-    if (legs.length < 2) return null; // longshot is always a multi-leg profit pack
-    if (totalOdds < 2.8) return null;
-    if (confidence < 0.1) return null;
+    if (legs.length < 2) return drop("slip: longshot needs 2+ legs"); // longshot is always a multi-leg profit pack
+    if (totalOdds < 2.8) return drop("slip: longshot combined odds below 2.8");
+    if (confidence < 0.1) return drop("slip: combined probability below floor");
   }
 
   let playOut: PlayOutResult | null = null;
@@ -577,12 +684,13 @@ async function bookSlip(
     playOut = await aiPlayOutLegs(legs, mode, totalOdds);
     const floor = mode === "safe" ? 0.55 : mode === "boost" ? 0.4 : 0.28;
     if (playOut && (!playOut.pass || playOut.confidence < floor)) {
-      return null; // AI veto — thin edge
+      return drop("slip: AI play-out veto"); // AI veto — thin edge
     }
   }
 
   const rationale = await explainSlip(legs, totalOdds, confidence, snap, mode, playOut);
   const booked = await createBookingCode(legs);
+  if (!booked.code) drop("slip: booking failed");
   return {
     slot,
     mode,
@@ -807,6 +915,7 @@ export async function buildSureSlipsOfDay(
     for (const s of built) {
       for (const l of s.legs) used.add(l.eventId);
       slips.push(s);
+      traceSelected(mode, s.legs, s.code);
     }
   }
 

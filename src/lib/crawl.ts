@@ -9,7 +9,9 @@ import {
 import { fetchFinalScore, settlePick, type BookableLeg } from "./sporty";
 import type { LegHistoryRow } from "./learning";
 import { settleLikedCodes } from "./liked";
-import { crawlLogSlips, runPredictionLog } from "./prediction-log";
+import { crawlLogSlips } from "./prediction-log";
+import { auditAfterCrawl, auditBudgetAfterCrawl } from "./audit-crawl";
+import { newCandidateStore, withCandidateTrace } from "./candidate-trace";
 import {
   buildPlentyCodes,
   getAnalysisBoard,
@@ -183,6 +185,7 @@ export async function runSureCrawl(): Promise<CrawlResult> {
   let slips: Awaited<ReturnType<typeof buildSureSlipsOfDay>> = [];
   const loggedPlenty: Awaited<ReturnType<typeof buildPlentyCodes>> = [];
   let loggedPreds: Awaited<ReturnType<typeof getPredictions>> = [];
+  const candidates = newCandidateStore();
 
   try {
     // Sure slips first — settling can eat the whole serverless budget.
@@ -193,12 +196,14 @@ export async function runSureCrawl(): Promise<CrawlResult> {
       ]);
       historyLegs = Math.max(historyLegs, legHistory.length);
       const allowAi = deadline.ok(12_000) && Boolean(process.env.OPENAI_API_KEY);
-      slips = await buildSureSlipsOfDay(3, history, {
-        allowAi,
-        legHistory,
-        modes: ["safe", "boost", "longshot"],
-        deadline,
-      });
+      slips = await withCandidateTrace(candidates, () =>
+        buildSureSlipsOfDay(3, history, {
+          allowAi,
+          legHistory,
+          modes: ["safe", "boost", "longshot"],
+          deadline,
+        }),
+      );
 
       for (const slip of slips) {
         if (!slip.code) continue;
@@ -370,17 +375,19 @@ export async function runSureCrawl(): Promise<CrawlResult> {
       slips: [],
     };
   } finally {
-    // Audit log only — runPredictionLog never throws and stays inside the time budget.
-    await runPredictionLog(
-      () =>
+    // Audit only — never throws; bounded by the function's hard limit, not the crawl budget.
+    await auditAfterCrawl({
+      day,
+      candidates,
+      budgetMs: auditBudgetAfterCrawl(deadline),
+      build: () =>
         crawlLogSlips({
           day,
           sure: slips.filter((s) => s.code),
           plenty: loggedPlenty,
           predictions: loggedPreds,
         }),
-      deadline.left() - 1_500,
-    );
+    });
   }
 }
 
