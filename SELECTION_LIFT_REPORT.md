@@ -3,26 +3,66 @@
 **Question:** Are Sure Code's selected high-confidence picks genuinely better than comparable picks the system rejected?
 
 **Period examined:** every candidate ever stored, 2026-10-08 19:18 UTC → 2026-10-13 21:20 UTC (22,069 candidate rows).
-**Generated:** 2026-10-13. Prediction logic was not changed.
+**Interim update:** 2026-10-13 22:10 UTC, after the settlement fix went live. **5,732 candidates are graded so far.** Grading by day: Oct 8 1,237/2,524 · Oct 9 2,338/4,489 · Oct 10 1,914/5,060 · Oct 11 243/3,638 · Oct 12 0/2,833 · Oct 13 0/3,525. Prediction logic was not changed.
 
-## The three answers
+## The three answers (interim, on what is graded now)
 
 | | Answer |
 |---|---|
-| **1. Do selected high-confidence picks outperform comparable rejected picks?** | **Unknown — it cannot be measured yet.** Not one selected or rejected candidate has a graded result. |
-| **2. By how many percentage points?** | **No measurement.** Selection Lift is undefined (0 graded matched pairs). No number is reported because any number would be invented. |
-| **3. Is the sample large enough to trust the result?** | **No.** Graded sample = 0. Once the backlog is graded (expected within ~1–2 days of this deploy) the first read will have ~100 selected picks, which can only detect a lift of about ±13 pp. Detecting a 5 pp lift needs ~700 selected picks (~6 weeks). |
+| **1. Do selected high-confidence picks outperform comparable rejected picks?** | **No evidence that they do.** Safe selected picks hit **86.4%** (19 of 22). Matched rejected picks at the same odds hit **90.7%** (49 of 54). |
+| **2. By how many percentage points?** | **Selection Lift = −4.4 pp** (95% interval −24.8 to +9.5 pp). Both sides averaged the same implied probability (87.2% vs 87.0%), so the match is fair. |
+| **3. Is the sample large enough to trust the result?** | **No.** Only 22 selected picks are graded, and the interval spans about 34 pp and includes zero. At this point "selection adds nothing" and "selection adds ~10 pp" are both consistent with the data. About 180 graded picks are needed to detect a 10 pp lift, and about 700 for 5 pp. |
 
-## Why there is no answer yet
+## Interim results
+
+### How often Sure Code Safe has entered (published Safe board, pre-kickoff, since Oct 8)
+
+| Measure | Won | Lost | Hit rate | Still pending | Void/cancelled |
+|---|---|---|---|---|---|
+| **Safe codes (whole slip)** | 48 | 21 | **69.6%** | 18 | 4 |
+| Safe legs (individual games) | 83 | 21 | **79.8%** | 22 | 14 |
+
+Safe codes by day (won / lost / pending): Oct 8 3/5/0 · Oct 9 15/2/0 · Oct 10 11/2/0 · Oct 11 12/6/2 · Oct 12 5/6/4 · Oct 13 2/0/12.
+Codes are counted once per distinct booking code that appeared on the Safe board. The board is rebuilt hourly, so a day has more codes than the 3 Safe slots. A code wins only if no leg loses.
+
+### Selection lift, Safe tier (high-confidence: implied ≥ 70%)
+
+| Group | Selected n | Selected wins | Selected hit % | Matched rejected n | Rejected wins | Rejected hit % | Selection Lift | 95% interval |
+|---|---|---|---|---|---|---|---|---|
+| **Overall (Safe)** | 22 | 19 | 86.4 | 54 | 49 | 90.7 | **−4.4 pp** | −24.8 to +9.5 |
+| Basketball | 11 | 11 | 100.0 | 26 | 23 | 88.5 | +11.5 pp | −15.4 to +29.0 |
+| Football | 7 | 5 | 71.4 | 19 | 18 | 94.7 | −23.3 pp | −59.1 to +4.8 |
+| Tennis | 4 | 3 | 75.0 | 9 | 8 | 88.9 | −13.9 pp | −59.7 to +24.4 |
+| Market: Winner (basketball + tennis) | 15 | 14 | 93.3 | 35 | 31 | 88.6 | +4.8 pp | −19.4 to +20.3 |
+| Market: Over/Under (football) | 7 | 5 | 71.4 | 19 | 18 | 94.7 | −23.3 pp | −59.1 to +4.8 |
+
+- Same-league controls were found for 27% of the Safe picks; the rest matched on sport, market, day, lead time and odds.
+- Every interval includes zero. No subgroup reaches the 30-pick minimum.
+
+### Boost and Longshot, analysed separately (selected legs with implied ≥ 30%)
+
+These tiers have no legs at 70% or above, so they use a lower threshold and are never pooled with Safe.
+
+| Tier | Selected n | Selected hit % | Matched rejected n | Rejected hit % | Selection Lift | 95% interval |
+|---|---|---|---|---|---|---|
+| Longshot | 28 | 57.1 | 70 | 51.4 | +5.7 pp | −15.6 to +25.7 |
+| Boost | 13 | 61.5 | 22 | 63.6 | −2.1 pp | −33.0 to +27.2 |
+
+### What this means right now
+
+- On graded data so far, the Safe engine is not picking better legs than the ones it rejects at the same price. Rejected high-confidence legs won about as often, or slightly more often.
+- The graded high-confidence Safe picks won 86.4% against an average implied probability of 87.2%. That is in line with the bookmaker's price, so the selection step has added nothing measurable on top of the odds so far.
+- Football Over/Under is the weakest early signal (5 of 7 against 18 of 19 rejected). Basketball Winner is the strongest (11 of 11). Neither is close to trustworthy yet.
+- **Do not change the engine on these numbers.** Re-run once Oct 11–13 are graded (about 100 Safe picks), and again around Oct 25 (about 180).
+
+## Why the full answer took this long
 
 1. **No rejected candidates exist before 2026-10-08.** Before the Oct 8 audit deploy, the system stored only the legs it booked (`sc_leg_history`, `sc_sure_codes`). Rejected picks were never written anywhere, so there is nothing historical to compare against. Reconstructing them would mean re-running the engine with odds that are no longer available, so per the brief they were not invented.
-2. **The stored candidates were never graded, because of a bug, now fixed.** Candidates have been logged since Oct 8, and settlement was meant to grade them after each audit run. But every final grading update also wrote a `result_source` column, which exists on `prediction_log` and not on `prediction_candidates`. Supabase rejected every update ("Could not find the 'result_source' column of 'prediction_candidates'"). Rows that failed never recorded the check, so the same oldest batch was retried on every run. All 22,069 rows are still `pending`, and 17,207 past-kickoff rows have never recorded a check.
+2. **The stored candidates were never graded, because of a bug, now fixed.** Candidates have been logged since Oct 8, and settlement was meant to grade them after each audit run. But every final grading update also wrote a `result_source` column, which exists on `prediction_log` and not on `prediction_candidates`. Supabase rejected every update ("Could not find the 'result_source' column of 'prediction_candidates'"). Rows that failed never recorded the check, so the same oldest batch was retried on every run. Before the fix, all 22,069 rows were `pending`, and 17,207 past-kickoff rows had never recorded a check.
    - **Fix (this change):** settlement now drops columns the candidate table lacks (`settlePatchFor` in `src/lib/prediction-settle.ts`, with a test). Published predictions in `prediction_log` were never affected.
-   - After deploy, the existing audit cron (20 runs a day) grades up to 1,500 candidates per run, so the backlog should clear in about 1–2 days.
+   - Deployed 2026-10-13. Manual backlog passes (`/api/cron/audit?candidates_only=1`) graded 5,732 rows before stopping. SportyBet throttles rapid bursts, so passes need about 30 seconds between them. The scheduled audit cron (20 runs a day) keeps grading the rest automatically.
 
-## What is ready once results exist
-
-Data coverage today, with results not yet used:
+## Coverage (all stored candidates, graded or not)
 
 | Tier | Selected picks | Of which high-confidence (implied ≥ 70%) | Rejected candidates |
 |---|---|---|---|
@@ -35,7 +75,7 @@ Data coverage today, with results not yet used:
 - **Matchability (dry run with results ignored):** 102 of 103 selected picks have at least one comparable rejected control, for 247 controls in total (average 2.4 per pick). Controls are from the same league for 35 of the 102 picks (34%); the rest fall back to the same sport, market, day and lead time.
 - Leakage check: 0 candidates were evaluated at or after kickoff.
 
-Expected first readout once the backlog is graded, by group (n = selected picks):
+Expected readout once the whole backlog is graded, by group (n = selected picks):
 
 | Group | Selected n (approx.) | Trustworthy? |
 |---|---|---|
