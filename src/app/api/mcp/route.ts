@@ -22,6 +22,9 @@ type Access = "full" | "gpt";
 const NO_STORE = { "Cache-Control": "no-store" };
 const MIN_KEY_LENGTH = 24;
 
+/** Full-access key for the Claude connector, baked in like the GPT key. MCP_API_KEY adds another. */
+const MCP_API_SECRET_DEFAULT = "sc_mcp_eBHYQI8GfqadWC1VfT8e1lWOHiIXgypjefbqyp7L";
+
 const digest = (v: string) => createHash("sha256").update(v, "utf8").digest();
 
 function presentedTokens(request: Request): string[] {
@@ -34,14 +37,15 @@ function presentedTokens(request: Request): string[] {
 }
 
 /**
- * MCP_API_KEY (header or ?key=) or PREDICTION_LOG_API_KEY (header only) → every tool.
+ * MCP key (header or ?key=) or PREDICTION_LOG_API_KEY (header only) → every tool.
  * The Custom GPT key → the same tools ChatGPT has.
  */
 function accessFor(request: Request): Access | null {
-  const mcpKey = (process.env.MCP_API_KEY ?? "").trim();
-  if (mcpKey.length >= MIN_KEY_LENGTH && presentedTokens(request).some((t) => timingSafeEqual(digest(t), digest(mcpKey)))) {
-    return "full";
-  }
+  const mcpKeys = [MCP_API_SECRET_DEFAULT, process.env.MCP_API_KEY ?? ""]
+    .map((k) => k.trim())
+    .filter((k) => k.length >= MIN_KEY_LENGTH);
+  const tokens = presentedTokens(request);
+  if (mcpKeys.some((k) => tokens.some((t) => timingSafeEqual(digest(t), digest(k))))) return "full";
   if (checkPredictionLogAuth(request).ok) return "full";
   if (gptAuthorized(request)) return "gpt";
   return null;
