@@ -140,6 +140,18 @@ export function gradeSelection(
   return { result: graded ? "win" : "loss" };
 }
 
+const V1_SETTLE_COLUMNS = ["result", "final_score", "settled_at", "settle_note"];
+/** prediction_candidates has no result_source column. */
+const CANDIDATE_EXCLUDED_COLUMNS = ["result_source"];
+
+/** The subset of a settlement patch the target table can accept. */
+export function settlePatchFor(table: string, v2: boolean, patch: Record<string, unknown>): Record<string, unknown> {
+  const keep = ([k, v]: [string, unknown]) =>
+    v !== undefined &&
+    (v2 ? !(table === CANDIDATES_TABLE && CANDIDATE_EXCLUDED_COLUMNS.includes(k)) : V1_SETTLE_COLUMNS.includes(k));
+  return Object.fromEntries(Object.entries(patch).filter(keep));
+}
+
 type PendingRow = {
   id: string;
   event_id: string;
@@ -187,17 +199,9 @@ async function settleTable(
     byEvent.set(row.event_id, list);
   }
 
-  const strip = (patch: Record<string, unknown>) => {
-    if (v2) return patch;
-    const { result, final_score, settled_at, settle_note } = patch;
-    return Object.fromEntries(
-      Object.entries({ result, final_score, settled_at, settle_note }).filter(([, v]) => v !== undefined),
-    );
-  };
-
   async function apply(ids: string[], patch: Record<string, unknown>, counts = true) {
     if (!ids.length || left() < 400) return;
-    const body = strip(patch);
+    const body = settlePatchFor(table, v2, patch);
     if (!Object.keys(body).length) return;
     const r = await withTimeout(
       sb!.from(table).update(body).in("id", ids).eq("result", "pending"),

@@ -75,7 +75,8 @@ export async function logCandidates(
     out.written = ins.written;
 
     // Anything that ended up in a published slip is always marked selected,
-    // even if an earlier run of the day logged it as rejected.
+    // even if an earlier run of the day logged it as rejected. Odds, run and
+    // evaluation time move together so lead time matches the selected price.
     for (let i = 0; i < selected.length; i += 10) {
       const left = timeoutMs - (Date.now() - started);
       if (left < 300) break;
@@ -84,7 +85,15 @@ export async function logCandidates(
           withTimeout(
             sb
               .from(CANDIDATES_TABLE)
-              .update({ status: "selected", stage: "slip", rejection_reason: null, slip_code: r.slip_code, odds: r.odds })
+              .update({
+                status: "selected",
+                stage: "slip",
+                rejection_reason: null,
+                slip_code: r.slip_code,
+                odds: r.odds,
+                run_id: r.run_id,
+                evaluated_at: r.evaluated_at,
+              })
               .eq("dedupe_key", r.dedupe_key),
             left,
           ),
