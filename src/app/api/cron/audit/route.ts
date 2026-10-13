@@ -28,13 +28,20 @@ const BUDGET_MS = 75_000;
  *
  * `?recover_days=N` (0–60, default 2) widens the recovery window, e.g. once
  * after the v2 migration to bring in the history since launch.
+ * `?candidates_only=1` skips recovery and published predictions and spends the
+ * whole budget grading the prediction_candidates backlog.
  */
 async function handle(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const started = Date.now();
-  const raw = Number(new URL(request.url).searchParams.get("recover_days") ?? 2);
+  const q = new URL(request.url).searchParams;
+  if (q.get("candidates_only") === "1") {
+    const result = await runAuditMaintenance({ budgetMs: BUDGET_MS, candidatesOnly: true });
+    return NextResponse.json({ ok: true, ...result }, { headers: { "Cache-Control": "no-store" } });
+  }
+  const raw = Number(q.get("recover_days") ?? 2);
   const days = Number.isFinite(raw) ? Math.min(60, Math.max(0, Math.floor(raw))) : 2;
   const recovered = await recoverStoredSureCodes({ days, budgetMs: days > 2 ? 40_000 : 15_000 });
   const result = await runAuditMaintenance({ budgetMs: BUDGET_MS - (Date.now() - started) });

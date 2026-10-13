@@ -407,6 +407,8 @@ export type MaintenanceResult = {
 export async function runAuditMaintenance(opts: {
   budgetMs: number;
   closing?: boolean;
+  /** Spend the whole budget on the candidate backlog (no closing odds, no published predictions). */
+  candidatesOnly?: boolean;
 }): Promise<MaintenanceResult> {
   const started = Date.now();
   const empty: SettleStats = { checked: 0, settled: 0, events: 0, needsReview: 0 };
@@ -422,6 +424,11 @@ export async function runAuditMaintenance(opts: {
     const schema = await auditSchema();
     const cache: ResultCache = new Map();
 
+    if (opts.candidatesOnly) {
+      if (schema.candidates) out.candidates = await settleTable(CANDIDATES_TABLE, true, cache, left() - 1_000, 3_000);
+      out.ms = Date.now() - started;
+      return out;
+    }
     if (opts.closing !== false && left() > 12_000) {
       out.closing = await snapshotClosingOdds(Math.min(30_000, left() * 0.35));
     }
