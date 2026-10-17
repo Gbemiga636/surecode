@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { recoverStoredSureCodes } from "@/lib/prediction-recover";
-import { runAuditMaintenance } from "@/lib/prediction-settle";
+import { resetStaleCancellations, runAuditMaintenance } from "@/lib/prediction-settle";
 
 export const maxDuration = 90;
 export const dynamic = "force-dynamic";
@@ -30,6 +30,8 @@ const BUDGET_MS = 75_000;
  * after the v2 migration to bring in the history since launch.
  * `?candidates_only=1` skips recovery and published predictions and spends the
  * whole budget grading the prediction_candidates backlog.
+ * `?regrade_stale_cancels=1` first puts rows the old 72h rule marked
+ * `cancelled` ("No final result 72h after kickoff") back to pending.
  */
 async function handle(request: Request) {
   if (!isAuthorized(request)) {
@@ -37,6 +39,11 @@ async function handle(request: Request) {
   }
   const started = Date.now();
   const q = new URL(request.url).searchParams;
+  if (q.get("regrade_stale_cancels") === "1") {
+    const reset = await resetStaleCancellations();
+    const result = await runAuditMaintenance({ budgetMs: BUDGET_MS - (Date.now() - started), closing: false });
+    return NextResponse.json({ ok: true, reset, ...result }, { headers: { "Cache-Control": "no-store" } });
+  }
   if (q.get("candidates_only") === "1") {
     const result = await runAuditMaintenance({ budgetMs: BUDGET_MS, candidatesOnly: true });
     return NextResponse.json({ ok: true, ...result }, { headers: { "Cache-Control": "no-store" } });

@@ -6,6 +6,7 @@
  * on the raw bookmaker-implied probability (1 / odds) so the two can be
  * compared honestly.
  */
+import { uniqueCandidates } from "./selection-lift";
 
 export type ReportRow = {
   event_id: string | null;
@@ -35,9 +36,15 @@ export type CandidateRow = {
   odds: number | null;
   status: string;
   result: string;
+  event_id?: string;
+  pick_code?: string | null;
+  evaluated_at?: string | null;
 };
 
 const r4 = (n: number) => Math.round(n * 10_000) / 10_000;
+
+/** settle_note of a pending row whose match SportyBet moved; overdue is measured from the new start. */
+export const RESCHEDULED_NOTE_PREFIX = "rescheduled to ";
 
 /** Wilson 95% interval for a proportion. */
 export function wilson(wins: number, n: number): [number, number] | null {
@@ -112,7 +119,8 @@ function legSummary(rows: ReportRow[]) {
   for (const r of rows) {
     if (r.result in c) (c as Record<string, number>)[r.result]++;
     const odds = Number(r.odds) || 0;
-    if (r.result === "win" || r.result === "loss" || r.result === "void") {
+    // Void / cancelled legs return the stake: outside the ROI denominator, never a loss.
+    if (r.result === "win" || r.result === "loss") {
       staked++;
       if (r.result === "win") profit += odds - 1;
       else if (r.result === "loss") profit -= 1;
@@ -168,7 +176,7 @@ function slipSummary(rows: ReportRow[]) {
     } else if (outcome === "loss") {
       staked++;
       profit -= 1;
-    } else if (outcome === "void") staked++;
+    }
     const n = legs.length;
     const b = byLegs.get(n) ?? { n: 0, win: 0, graded: 0 };
     b.n++;
@@ -228,7 +236,11 @@ function dataQuality(rows: ReportRow[]) {
   let noEvent = 0;
   for (const r of rows) {
     const ko = r.kickoff ? Date.parse(r.kickoff) : NaN;
-    if (r.result === "pending" && !r.settled_at && Number.isFinite(ko) && now - ko > 6 * 3_600_000) overdue++;
+    const moved = r.settle_note?.startsWith(RESCHEDULED_NOTE_PREFIX)
+      ? Date.parse(r.settle_note.slice(RESCHEDULED_NOTE_PREFIX.length))
+      : NaN;
+    const due = Number.isFinite(moved) ? moved : ko;
+    if (r.result === "pending" && !r.settled_at && Number.isFinite(due) && now - due > 6 * 3_600_000) overdue++;
     if (r.result === "pending" && r.settle_note?.startsWith("needs manual grading")) review++;
     if (Number.isFinite(ko) && Date.parse(r.created_at) >= ko) late++;
     if (!r.event_id) noEvent++;
@@ -243,7 +255,13 @@ function dataQuality(rows: ReportRow[]) {
 
 /** Selected vs rejected hit rate inside matched tier × market × odds-band cells. */
 export function selectionLift(rows: CandidateRow[]) {
-  const settled = rows.filter((r) => r.result === "win" || r.result === "loss");
+  const graded = rows.filter((r) => r.result === "win" || r.result === "loss");
+  // One row per unique selection (tier, event, pick) on both sides; rows without ids can't be de-duplicated.
+  const withIds = graded.filter((r) => r.event_id);
+  const settled = [
+    ...uniqueCandidates(withIds.map((r) => ({ ...r, event_id: String(r.event_id), evaluated_at: r.evaluated_at ?? null, pick_code: r.pick_code ?? null }))),
+    ...graded.filter((r) => !r.event_id),
+  ];
   const cells = new Map<string, { tier: string; sel: [number, number]; rej: [number, number] }>();
   for (const r of settled) {
     const tier = r.product_tier || "unknown";
@@ -278,10 +296,13 @@ export function selectionLift(rows: CandidateRow[]) {
     });
   }
   return {
-    settled_candidates: settled.length,
+    settled_candidates: graded.length,
+    unique_settled_selections: settled.length,
     by_tier: [...byTier.entries()].map(([tier, t]) => ({
       tier,
       matched_cells: t.cells,
+      unique_selected_n: t.selN,
+      unique_control_n: t.rejN,
       selected_n: t.selN,
       control_n: t.rejN,
       selection_lift: t.w ? r4(t.lift / t.w) : null,
@@ -308,7 +329,31 @@ export function uniqueSelections(rows: ReportRow[]): ReportRow[] {
   return [...first.values()];
 }
 
-export function buildReport(rows: ReportRow[], candidates: CandidateRow[] | null) {
+/**
+ * `evalRows` (from v_eval_selections) switches the report to the evaluation
+ * set: leg, probability and breakdown metrics use only those unique
+ * prospective selections, slips use prospective rows only, and recovered
+ * rows appear solely as a separate breakdown.
+ */
+export function buildReport(rows: ReportRow[], candidates: CandidateRow[] | null, evalRows?: ReportRow[]) {
+  if (!evalRows) return baseReport(rows, candidates);
+  const { breakdown, ...rest } = baseReport(evalRows, candidates);
+  const { by_data_origin: _origin, ...byOther } = breakdown;
+  const recovered = rows.filter((r) => r.data_origin === "recovered");
+  return {
+    ...rest,
+    slips: slipSummary(rows.filter((r) => r.data_origin !== "recovered")),
+    breakdown: byOther,
+    recovered_breakdown: {
+      note: "Rebuilt later from stored codes. Excluded from every metric above; reference only.",
+      rows: legSummary(recovered),
+      unique_selections: legSummary(uniqueSelections(recovered)),
+    },
+    data_quality: dataQuality(rows),
+  };
+}
+
+function baseReport(rows: ReportRow[], candidates: CandidateRow[] | null) {
   const settled = rows.filter((r) => r.result === "win" || r.result === "loss");
   const y = (r: ReportRow): 0 | 1 => (r.result === "win" ? 1 : 0);
   return {

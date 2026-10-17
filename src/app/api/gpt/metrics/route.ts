@@ -1,28 +1,22 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { T } from "@/lib/db";
 import { gptAuthorized, gptUnauthorized } from "@/lib/gpt-auth";
-import { calibration, inferSport, summarize, type Sample } from "@/lib/metrics";
+import { calibration, summarize, type Sample } from "@/lib/metrics";
+import { loadEvalSelections, loadLogRows, type LogRow } from "@/lib/eval-data";
+import { buildSlips } from "@/lib/evaluation";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
-type LegRow = {
-  league: string | null;
-  pick_code: string;
-  odds: number | null;
-  won: boolean;
-  home_score: number | null;
-  settled_at: string;
-};
+const sample = (r: LogRow): Sample => ({ p: 1 / Number(r.odds), y: r.result === "win" ? 1 : 0, odds: Number(r.odds) });
 
-function groupBy(rows: LegRow[], key: (r: LegRow) => string, minN: number) {
+function groupBy(rows: LogRow[], key: (r: LogRow) => string, minN: number) {
   const map = new Map<string, Sample[]>();
   for (const r of rows) {
     const k = key(r);
-    const odds = Number(r.odds);
     const arr = map.get(k) ?? [];
-    arr.push({ p: 1 / odds, y: r.won ? 1 : 0, odds });
+    arr.push(sample(r));
     map.set(k, arr);
   }
   return [...map.entries()]
@@ -33,8 +27,9 @@ function groupBy(rows: LegRow[], key: (r: LegRow) => string, minN: number) {
 
 /**
  * Probability-quality report for Custom GPT.
- * Leg forecast = market-implied 1/odds (bookmaker margin included).
- * Slip forecast = stored confidence (product of implied leg probabilities).
+ * Legs: unique selections from v_eval_selections (prospective, published,
+ * predicted before kickoff, graded), windowed on created_at. Leg forecast =
+ * market-implied 1/odds. Slips: official published slips by slip_code.
  */
 export async function GET(request: Request) {
   if (!gptAuthorized(request)) return gptUnauthorized(request);
@@ -43,81 +38,59 @@ export async function GET(request: Request) {
   const days = Math.min(365, Math.max(7, Number(url.searchParams.get("days")) || 90));
   const minN = Math.min(200, Math.max(1, Number(url.searchParams.get("minSample")) || 10));
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const sinceDay = since.slice(0, 10);
+  const win = { fromIso: since, toIso: null };
 
   try {
     const sb = createAdminClient();
-    const [legsRes, slipsRes] = await Promise.all([
-      sb
-        .from(T.legHistory)
-        .select("league, pick_code, odds, won, home_score, settled_at")
-        .gte("settled_at", since)
-        .order("settled_at", { ascending: false })
-        .limit(5000),
-      sb
-        .from(T.pastCodes)
-        .select("day, outcome, confidence, total_odds, legs")
-        .in("outcome", ["WON", "LOST"])
-        .gte("day", sinceDay)
-        .limit(2000),
-    ]);
+    const log = await loadLogRows(sb, win);
+    const sel = await loadEvalSelections(sb, win, log.rows);
+    const legs = sel.rows.filter((r) => Number(r.odds) > 1);
+    const legSamples = legs.map(sample);
 
-    if (legsRes.error) throw new Error(legsRes.error.message);
-    if (slipsRes.error) throw new Error(slipsRes.error.message);
-
-    const allLegs = (legsRes.data ?? []) as LegRow[];
-    // Rows without a recorded score came from a winning-slips-only backfill → biased.
-    const legs = allLegs.filter((r) => r.home_score != null && Number(r.odds) > 1);
-    const excludedUnscored = allLegs.filter((r) => r.home_score == null).length;
-
-    const legSamples: Sample[] = legs.map((r) => ({
-      p: 1 / Number(r.odds),
-      y: r.won ? 1 : 0,
-      odds: Number(r.odds),
+    const slips = buildSlips(log.rows.filter((r) => r.published && r.data_origin === "prospective" && r.created_at >= since)).filter(
+      (s) => s.created_before_first_kickoff && (s.outcome === "win" || s.outcome === "loss") && s.slip_confidence,
+    );
+    const slipSamples: Sample[] = slips.map((s) => ({
+      p: Number(s.slip_confidence),
+      y: s.outcome === "win" ? 1 : 0,
+      odds: s.payout_odds ?? s.slip_odds ?? undefined,
     }));
 
-    const slipSamples: Sample[] = (slipsRes.data ?? [])
-      .filter((r) => r.confidence != null)
-      .map((r) => ({
-        p: Number(r.confidence),
-        y: r.outcome === "WON" ? 1 : 0,
-        odds: r.total_odds != null ? Number(r.total_odds) : undefined,
-      }));
-
-    const lastSettled = legs[0]?.settled_at ?? null;
-    const staleHours = lastSettled
-      ? Math.round((Date.now() - new Date(lastSettled).getTime()) / 36e5)
-      : null;
+    const lastSettled = log.rows.reduce<string | null>((a, r) => (r.settled_at && (!a || r.settled_at > a) ? r.settled_at : a), null);
+    const staleHours = lastSettled ? Math.round((Date.now() - new Date(lastSettled).getTime()) / 36e5) : null;
 
     return NextResponse.json(
       {
         ok: true,
         generatedAt: new Date().toISOString(),
-        window: { days, since },
+        window: { days, since, on: "created_at" },
         definitions: {
+          legs: "Unique selections (one per product, event, pick; first publication) from v_eval_selections.",
           legForecast: "Market-implied probability 1/odds (includes bookmaker margin; not de-vigged).",
           slipForecast:
             "Stored slip confidence = product of implied leg probabilities. Not a calibrated model probability.",
           brierSkill: "1 - Brier / Brier(base-rate forecast). >0 beats always predicting the base rate.",
-          flatStakeRoi: "Mean profit per 1-unit stake. Secondary, high-variance metric.",
+          flatStakeRoi: "Mean profit per 1-unit stake. Void / cancelled legs are excluded. Secondary, high-variance metric.",
           ece: "Expected calibration error across 10 equal-width probability bins.",
         },
         dataQuality: {
-          legRowsInWindow: allLegs.length,
-          legRowsUsed: legs.length,
-          excludedUnscoredRows: excludedUnscored,
-          excludedReason:
-            "Rows without scores came from a winning-slips-only backfill (selection bias).",
+          legSource: sel.source,
+          legCount: sel.rows.length,
+          viewCount: sel.viewCount,
+          legCountMatchesView: sel.viewCount == null ? null : sel.viewCount === sel.rows.length,
+          legsUsed: legs.length,
+          officialSlipsGraded: slips.length,
           lastSettledAt: lastSettled,
           hoursSinceLastSettle: staleHours,
           stale: staleHours == null || staleHours > 48,
-          sportColumn: "absent — sport inferred from pick code",
+          excluded: "Recovered rows, rows logged after kickoff, unpublished rows and repeat bookings of the same selection.",
         },
         legs: {
           overall: summarize(legSamples),
           calibration: calibration(legSamples),
-          byMarket: groupBy(legs, (r) => r.pick_code, minN),
-          bySport: groupBy(legs, (r) => inferSport(r.pick_code), minN),
+          byMarket: groupBy(legs, (r) => r.pick_code ?? "unknown", minN),
+          bySport: groupBy(legs, (r) => r.sport ?? "unknown", minN),
+          byTier: groupBy(legs, (r) => `${r.product} · ${r.tier}`, minN),
           byLeague: groupBy(legs, (r) => r.league || "unknown", minN).slice(0, 25),
         },
         slips: {

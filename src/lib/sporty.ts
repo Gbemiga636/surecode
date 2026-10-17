@@ -299,6 +299,40 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
+/** `${marketId}|${specifier}` → active outcome id → odds. */
+export type MarketBook = Record<string, Record<string, number>>;
+
+const MARKET_CACHE_MAX = 6_000;
+const marketCache = new Map<string, { at: number; markets: MarketBook }>();
+
+/** Every active outcome price in a SportyBet event payload (feed or event API). */
+export function readMarketBook(markets: unknown): MarketBook {
+  const book: MarketBook = {};
+  for (const m of (Array.isArray(markets) ? markets : []) as Record<string, unknown>[]) {
+    if (m.id == null) continue;
+    const prices: Record<string, number> = {};
+    for (const o of (Array.isArray(m.outcomes) ? m.outcomes : []) as Record<string, unknown>[]) {
+      const odds = Number(o.odds);
+      if (o.id != null && o.isActive !== 0 && Number.isFinite(odds) && odds > 1) prices[String(o.id)] = odds;
+    }
+    if (Object.keys(prices).length) book[`${m.id}|${m.specifier ?? ""}`] = prices;
+  }
+  return book;
+}
+
+/** Prices seen when fixtures were last fetched in this instance (audit only; the engine never reads it). */
+export function cachedMarketBook(eventId: string): { at: number; markets: MarketBook } | null {
+  return marketCache.get(eventId) ?? null;
+}
+
+function rememberMarkets(eventId: string, markets: unknown) {
+  const book = readMarketBook(markets);
+  if (!Object.keys(book).length) return;
+  marketCache.delete(eventId);
+  marketCache.set(eventId, { at: Date.now(), markets: book });
+  while (marketCache.size > MARKET_CACHE_MAX) marketCache.delete(marketCache.keys().next().value as string);
+}
+
 function parseEvent(
   e: Record<string, unknown>,
   league: string | undefined,
@@ -306,6 +340,7 @@ function parseEvent(
   sportLabel = "Football",
 ): SbEvent | null {
   if (!e.eventId || !e.homeTeamName || !e.awayTeamName) return null;
+  rememberMarkets(String(e.eventId), e.markets);
   const outcomes: Record<string, number> = {};
   for (const m of (e.markets as Record<string, unknown>[]) ?? []) {
     for (const [code, meta] of Object.entries(PICKS)) {

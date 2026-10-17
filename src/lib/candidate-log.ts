@@ -17,7 +17,7 @@ import {
   upsertChunks,
   withTimeout,
 } from "./audit-db";
-import { modelVersion } from "./prediction-log";
+import { appCommit, modelVersion, withMarketSnapshots } from "./prediction-log";
 
 export async function logCandidates(
   store: CandidateStore,
@@ -37,7 +37,7 @@ export async function logCandidates(
     const items = readCandidates(store).filter((c) => c.eventId && c.pickCode);
     if (!items.length) return out;
 
-    const rows = items.map((c) => ({
+    let rows: Record<string, unknown>[] = items.map((c) => ({
       run_id: ctx.runId,
       day: ctx.day,
       evaluated_at: new Date(c.evaluatedAt).toISOString(),
@@ -60,6 +60,11 @@ export async function logCandidates(
       model_version: version,
       dedupe_key: `${ctx.day}|${c.mode}|${c.eventId}|${c.pickCode}`,
     }));
+
+    if (schema.evalV1) {
+      const commit = appCommit();
+      rows = (await withMarketSnapshots(rows, Math.min(4_000, timeoutMs * 0.25))).map((r) => ({ ...r, app_commit: commit }));
+    }
 
     // First evaluation of the day is kept; selected rows go first so a short
     // budget still records them.
@@ -93,8 +98,11 @@ export async function logCandidates(
                 odds: r.odds,
                 run_id: r.run_id,
                 evaluated_at: r.evaluated_at,
+                ...(schema.evalV1
+                  ? { market_odds: r.market_odds, overround: r.overround, devig_prob: r.devig_prob, app_commit: r.app_commit }
+                  : {}),
               })
-              .eq("dedupe_key", r.dedupe_key),
+              .eq("dedupe_key", String(r.dedupe_key)),
             left,
           ),
         ),

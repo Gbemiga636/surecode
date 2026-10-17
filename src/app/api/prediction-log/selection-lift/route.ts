@@ -88,6 +88,8 @@ export async function GET(request: Request) {
         filters: { from, to },
         truncated,
         pending_candidates: pending,
+        unique_selected_n: report.overall_matched_within_tier.unique_selected_n,
+        unique_control_n: report.overall_matched_within_tier.unique_control_n,
         ...report,
       },
       { headers: NO_STORE },

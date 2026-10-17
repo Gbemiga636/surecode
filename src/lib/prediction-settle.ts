@@ -17,6 +17,7 @@ import {
   withTimeout,
 } from "./audit-db";
 import type { LogResult } from "./prediction-log";
+import { RESCHEDULED_NOTE_PREFIX } from "./prediction-report";
 
 const EVENT_API = "https://www.sportybet.com/api/ng/factsCenter/event?eventId=";
 const HEADERS = {
@@ -29,21 +30,35 @@ const HEADERS = {
 
 /** Matches are checked from 105 min after kickoff. */
 const SETTLE_AFTER_MS = 105 * 60_000;
-/** No final result this long after kickoff → cancelled (postponed / abandoned). */
-const CANCEL_AFTER_MS = 72 * 3_600_000;
+/** SportyBet keeps answering without a final result this long after kickoff → parked for manual grading. */
+const PARK_AFTER_MS = 6 * 3_600_000;
+/** Parked "no final result" rows are re-checked for this long, so a late result still grades automatically. */
+const PARKED_RETRY_MS = 7 * 24 * 3_600_000;
+/** A match moved further than this from the logged kickoff is void (standard postponement rule). */
+const POSTPONED_VOID_MS = 48 * 3_600_000;
 /** Markets that need a half-time score stop retrying after this many checks. */
 const MAX_UNGRADED_ATTEMPTS = 6;
-/** Checks (with an answer from SportyBet) needed before "no result" becomes cancelled. */
-const MIN_CANCEL_ATTEMPTS = 3;
-/** Failed lookups past the cancel window before a row is parked for manual grading. */
+/** Checks (with an answer from SportyBet) needed before a row is parked. */
+const MIN_PARK_ATTEMPTS = 3;
+/** Failed lookups past the park window before a row is parked for manual grading. */
 const MAX_NO_DATA_ATTEMPTS = 12;
+/** Fake cancellations written by the old 72h rule; reset once so the fixed settler grades them. */
+export const STALE_CANCEL_NOTE = "No final result 72h after kickoff";
+export const NO_RESULT_PARK_NOTE = "needs manual grading: no final result from SportyBet";
 
 type Score = { home: number; away: number };
+export type EventSport = "football" | "basketball" | "tennis" | "hockey" | "baseball";
 
 export type EventResult = {
-  state: "ended" | "live" | "not_started" | "cancelled" | "unknown";
+  state: "ended" | "live" | "not_started" | "postponed" | "cancelled" | "unknown";
+  /** Final score including overtime / extra innings (sets for tennis). */
   ft: Score | null;
+  /** Regulation-time score (90 min, 3 periods, 9 innings). Null when it can't be established. */
+  regular: Score | null;
   ht: Score | null;
+  sport: EventSport | null;
+  /** SportyBet's current scheduled start (ms), which moves when a match is rescheduled. */
+  startTime: number | null;
   note?: string;
 };
 
@@ -72,24 +87,63 @@ function parseScorePair(v: unknown): Score | null {
   return m ? { home: Number(m[1]), away: Number(m[2]) } : null;
 }
 
+const SPORT_IDS: Record<string, EventSport> = {
+  "sr:sport:1": "football",
+  "sr:sport:2": "basketball",
+  "sr:sport:3": "baseball",
+  "sr:sport:4": "hockey",
+  "sr:sport:5": "tennis",
+};
+
+/** Periods that make up regulation time; every market except basketball / tennis Winner settles on it. */
+const REGULATION_PERIODS: Partial<Record<EventSport, number>> = { football: 2, hockey: 3, baseball: 9 };
+
+const sumScores = (xs: Score[]): Score => xs.reduce((a, p) => ({ home: a.home + p.home, away: a.away + p.away }), { home: 0, away: 0 });
+const sameScore = (a: Score, b: Score) => a.home === b.home && a.away === b.away;
+
+/** Inning / period list. Baseball marks an unplayed half-inning "X" (0 runs); anything else unreadable voids the list. */
+function parsePeriods(raw: unknown[]): Score[] | null {
+  const out: Score[] = [];
+  for (const v of raw) {
+    const p = parseScorePair(v);
+    if (p) out.push(p);
+    else {
+      const m = String(v ?? "").match(/^\s*(\d+|x)\s*[-:]\s*(\d+|x)\s*$/i);
+      if (!m) return null;
+      out.push({ home: Number(m[1]) || 0, away: Number(m[2]) || 0 });
+    }
+  }
+  return out;
+}
+
+function playedMinutes(v: unknown): number | null {
+  const m = String(v ?? "").match(/^(\d+):(\d{2})$/);
+  return m ? Number(m[1]) + Number(m[2]) / 60 : null;
+}
+
+function bestOfFive(d: Record<string, unknown>): boolean {
+  const sport = (d.sport ?? {}) as { category?: { name?: string; tournament?: { name?: string } } };
+  const name = `${sport.category?.name ?? ""} ${sport.category?.tournament?.name ?? ""}`;
+  return /australian open|roland garros|french open|wimbledon|us open|davis cup/i.test(name) && !/wta|women|ladies|itf|mixed|doubles/i.test(name);
+}
+
 /**
- * Final and (when SportyBet provides period scores) half-time result.
- * Mirrors the app's existing `fetchFinalScore` rules for "ended" and the
- * full-time score, and adds cancellation detection and period parsing.
+ * Turn a SportyBet event payload into a gradeable result (pure, for tests).
+ * Handles what the old rules missed: "PostMatch" as ended, ITF feeds that
+ * stall on a decided set score, rescheduled matches, and regulation-time
+ * scores for hockey overtime / extra innings / football extra time.
  */
-export async function fetchEventResult(eventId: string, ms = 8_000): Promise<EventResult | null> {
-  const d = await fetchEventJson(eventId, ms);
-  if (!d) return null;
+export function parseEventResult(d: Record<string, unknown>): EventResult {
   const statusNum = Number(d.status);
   const matchStatus = String(d.matchStatus ?? "").toLowerCase();
+  const period = String(d.period ?? "").toLowerCase();
+  const sport = SPORT_IDS[String((d.sport as { id?: string } | undefined)?.id ?? "")] ?? null;
+  const startTime = Number(d.estimateStartTime) || null;
+  const base = { sport, startTime, regular: null, ht: null } as const;
 
-  if (/cancel|abandon/.test(matchStatus)) return { state: "cancelled", ft: null, ht: null, note: String(d.matchStatus) };
-
-  const ended =
-    statusNum === 4 ||
-    matchStatus.includes("ended") ||
-    matchStatus.includes("finished") ||
-    matchStatus.includes("closed");
+  if (/cancel|abandon/.test(matchStatus)) return { ...base, state: "cancelled", ft: null, note: String(d.matchStatus) };
+  if (/retire|walkover|w\.o\./.test(matchStatus)) return { ...base, state: "unknown", ft: null, note: `retirement / walkover (${d.matchStatus})` };
+  if (/postpon|delayed|interrupt|suspend/.test(matchStatus)) return { ...base, state: "postponed", ft: null, note: String(d.matchStatus) };
 
   let ft: Score | null = null;
   const h = Number(d.homeScore);
@@ -97,30 +151,87 @@ export async function fetchEventResult(eventId: string, ms = 8_000): Promise<Eve
   if (Number.isFinite(h) && Number.isFinite(a) && d.homeScore != null && d.awayScore != null) ft = { home: h, away: a };
   else if (d.setScore) ft = parseScorePair(d.setScore);
 
-  const rawPeriods = Array.isArray(d.gameScore) ? d.gameScore : Array.isArray(d.periodScores) ? d.periodScores : [];
-  const periods = rawPeriods.map(parseScorePair).filter((p): p is Score => Boolean(p));
+  let ended =
+    statusNum === 4 || /ended|finished|closed|postmatch|post match|after|aet|\bap\b/.test(matchStatus) || period === "postmatch";
+  let note: string | undefined;
 
-  // Trust a half-time score only when exactly two periods add up to the final score.
-  let ht: Score | null = null;
-  if (ft && periods.length === 2) {
-    const sumHome = periods[0].home + periods[1].home;
-    const sumAway = periods[0].away + periods[1].away;
-    if (sumHome === ft.home && sumAway === ft.away) ht = periods[0];
+  if (!ended && !ft && (statusNum === 0 || /not start/.test(matchStatus))) return { ...base, state: "not_started", ft: null };
+
+  // ITF feeds often freeze on "set 2" after the last point; a decided set score is final.
+  if (!ended && ft && sport === "tennis") {
+    const need = bestOfFive(d) ? 3 : 2;
+    if (Math.max(ft.home, ft.away) >= need && ft.home !== ft.away) {
+      ended = true;
+      note = "final inferred from decided set score (feed did not flip to Ended)";
+    }
   }
 
-  if (!ft) return { state: ended ? "unknown" : "not_started", ft: null, ht: null };
-  return { state: ended ? "ended" : "live", ft, ht };
+  const rawPeriods = Array.isArray(d.gameScore) ? d.gameScore : Array.isArray(d.periodScores) ? d.periodScores : [];
+  const periods = parsePeriods(rawPeriods) ?? [];
+  const periodsMatchFinal = Boolean(ft && periods.length && sameScore(sumScores(periods), ft));
+
+  let ht: Score | null = null;
+  if (ft && sport !== "tennis" && sport !== "baseball" && periodsMatchFinal && periods.length >= 2) {
+    // Football: first period is the first half (also when extra-time periods follow).
+    if (sport === "football" || periods.length === 2) ht = periods[0];
+  }
+
+  let regular: Score | null = ft;
+  const regPeriods = sport ? REGULATION_PERIODS[sport] : undefined;
+  if (ft && regPeriods) {
+    const statusText = `${matchStatus} ${period}`;
+    const extraByText =
+      sport === "hockey"
+        ? /overtime|\bot\b|shootout|penalt|\bso\b|aet/.test(statusText)
+        : sport === "football"
+          ? /aet|after extra|extra time|penalt|\bap\b/.test(statusText)
+          : /extra/.test(statusText);
+    const mins = playedMinutes(d.playedSeconds);
+    const extra = extraByText || (sport === "hockey" && mins != null && mins > 60.5);
+    if (periodsMatchFinal && periods.length >= regPeriods) {
+      regular = sumScores(periods.slice(0, regPeriods));
+    } else if (extra && sport === "hockey" && Math.abs(ft.home - ft.away) === 1) {
+      // Sudden-death overtime and shootouts add exactly one goal to the winner.
+      regular = ft.home > ft.away ? { home: ft.home - 1, away: ft.away } : { home: ft.home, away: ft.away - 1 };
+    } else if (extra) {
+      regular = null;
+    }
+  }
+
+  if (!ft) return { ...base, state: ended ? "unknown" : "live", ft: null };
+  return { state: ended ? "ended" : "live", ft, regular, ht, sport, startTime, ...(note ? { note } : {}) };
+}
+
+/** Final, regulation and (when SportyBet provides period scores) half-time result. */
+export async function fetchEventResult(eventId: string, ms = 8_000): Promise<EventResult | null> {
+  const d = await fetchEventJson(eventId, ms);
+  return d ? parseEventResult(d) : null;
+}
+
+/** Logged kickoff vs SportyBet's current start: how far the match was moved (ms), or null. */
+export function rescheduledBy(ev: Pick<EventResult, "state" | "startTime">, loggedKickoffMs: number): number | null {
+  if ((ev.state !== "not_started" && ev.state !== "postponed") || !ev.startTime || !Number.isFinite(loggedKickoffMs)) return null;
+  const moved = ev.startTime - loggedKickoffMs;
+  return moved > 30 * 60_000 ? moved : null;
 }
 
 const FIRST_HALF = new Set(["1HO05", "1HDC1X", "1HDCX2"]);
+/** Winner markets (basketball incl. overtime, tennis) settle on the final result; everything else on regulation time. */
+const FULL_MATCH_MARKETS = new Set(["BBH", "BBA", "TNH", "TNA"]);
+
+/** Score a market settles on: final for Winner markets, regulation time otherwise. */
+export function settlementScore(pickCode: string | null, ev: Pick<EventResult, "ft" | "regular">): Score | null {
+  return pickCode && FULL_MATCH_MARKETS.has(pickCode) ? ev.ft : ev.regular;
+}
 
 /** Grade one selection. `null` result = can't be graded from what we have. */
 export function gradeSelection(
   pickCode: string | null,
-  ft: Score,
+  ft: Score | null,
   ht: Score | null,
 ): { result: LogResult | null; note?: string } {
   if (!pickCode || !PICKS[pickCode]) return { result: null, note: "unknown market code" };
+  if (!ft) return { result: null, note: "regulation-time score unavailable" };
   if (FIRST_HALF.has(pickCode)) {
     const half = ht ?? (ft.home === 0 && ft.away === 0 ? { home: 0, away: 0 } : null);
     if (!half) return { result: null, note: "half-time score unavailable" };
@@ -178,24 +289,43 @@ async function settleTable(
   const left = () => end - Date.now();
   const nowIso = () => new Date().toISOString();
 
+  const columns = v2 ? "id, event_id, pick_code, kickoff, settle_attempts" : "id, event_id, pick_code, kickoff";
   let query = sb
     .from(table)
-    .select(v2 ? "id, event_id, pick_code, kickoff, settle_attempts" : "id, event_id, pick_code, kickoff")
+    .select(columns)
     .eq("result", "pending")
     .is("settled_at", null)
     .not("event_id", "is", null)
     .lt("kickoff", new Date(Date.now() - SETTLE_AFTER_MS).toISOString());
   if (v2) query = query.order("last_checked_at", { ascending: true, nullsFirst: true });
   const res = await withTimeout(query.order("kickoff", { ascending: true }).limit(limit), Math.min(8_000, left()));
-  if (!res || res.error || !res.data?.length) {
+  if (!res || res.error) {
     if (res?.error) auditWarn(`${table} settle select`, res.error.message);
     return stats;
   }
+  const due = [...((res.data ?? []) as unknown as PendingRow[])];
+
+  // Parked "no final result" rows get re-checked for a week so late results still grade automatically.
+  if (v2 && left() > 4_000) {
+    const parked = await withTimeout(
+      sb
+        .from(table)
+        .select(columns)
+        .eq("result", "pending")
+        .eq("settle_note", NO_RESULT_PARK_NOTE)
+        .gt("kickoff", new Date(Date.now() - PARKED_RETRY_MS).toISOString())
+        .order("last_checked_at", { ascending: true, nullsFirst: true })
+        .limit(Math.max(20, Math.floor(limit / 4))),
+      Math.min(6_000, left()),
+    );
+    if (parked && !parked.error) due.push(...((parked.data ?? []) as unknown as PendingRow[]));
+  }
+  if (!due.length) return stats;
 
   const byEvent = new Map<string, PendingRow[]>();
-  for (const row of res.data as unknown as PendingRow[]) {
+  for (const row of due) {
     const list = byEvent.get(row.event_id) ?? [];
-    list.push(row);
+    if (!list.some((r) => r.id === row.id)) list.push(row);
     byEvent.set(row.event_id, list);
   }
 
@@ -234,28 +364,48 @@ async function settleTable(
     const ev = await withTimeout(pending, Math.min(9_000, left()));
     const oldest = Math.min(...rows.map((r) => Date.parse(r.kickoff) || Date.now()));
     const age = Date.now() - oldest;
+    const ids = rows.map((r) => r.id);
 
     if (ev?.state === "cancelled") {
-      await apply(
-        rows.map((r) => r.id),
-        { result: "cancelled", settled_at: nowIso(), settle_note: `SportyBet status: ${ev.note ?? "cancelled"}`, result_source: "auto" },
-      );
+      await apply(ids, { result: "cancelled", settled_at: nowIso(), settle_note: `SportyBet status: ${ev.note ?? "cancelled"}`, result_source: "auto" });
       return;
+    }
+
+    if (ev && (ev.state === "not_started" || ev.state === "postponed")) {
+      const moved = rescheduledBy(ev, oldest);
+      if ((moved != null && moved > POSTPONED_VOID_MS) || (ev.state === "postponed" && age > POSTPONED_VOID_MS)) {
+        const when = ev.startTime ? ` (now ${new Date(ev.startTime).toISOString()})` : "";
+        await apply(ids, { result: "void", settled_at: nowIso(), settle_note: `postponed more than 48h after the logged kickoff${when}`, result_source: "auto" });
+        return;
+      }
+      if (moved != null && ev.startTime) {
+        // Kept pending against the new start time; the report measures "overdue" from it.
+        await apply(ids, { settle_note: `${RESCHEDULED_NOTE_PREFIX}${new Date(ev.startTime).toISOString()}` }, false);
+        await touch(rows);
+        return;
+      }
     }
 
     if (!ev || ev.state !== "ended" || !ev.ft) {
       const attempts = Math.min(...rows.map((r) => r.settle_attempts ?? 0)) + 1;
-      if (ev && age > CANCEL_AFTER_MS && (!v2 || attempts >= MIN_CANCEL_ATTEMPTS)) {
-        // SportyBet answered, repeatedly, and still has no final result.
-        await apply(
-          rows.map((r) => r.id),
-          { result: "cancelled", settled_at: nowIso(), settle_note: "No final result 72h after kickoff", result_source: "auto" },
-        );
-      } else if (!ev && v2 && age > CANCEL_AFTER_MS && attempts >= MAX_NO_DATA_ATTEMPTS) {
-        // Never cancel on a failed lookup: park it for a human instead.
+      if (ev && age > PARK_AFTER_MS && (!v2 || attempts >= MIN_PARK_ATTEMPTS)) {
+        // SportyBet answers but has no final result: never invent a cancellation, park for a human
+        // (parked rows keep being re-checked, so a late result still grades automatically).
         stats.needsReview += rows.length;
         await apply(
-          rows.map((r) => r.id),
+          ids,
+          {
+            settled_at: nowIso(),
+            settle_note: ev.note?.startsWith("retirement") ? `needs manual grading: ${ev.note}` : NO_RESULT_PARK_NOTE,
+            settle_attempts: attempts,
+            last_checked_at: nowIso(),
+          },
+          false,
+        );
+      } else if (!ev && v2 && age > PARK_AFTER_MS && attempts >= MAX_NO_DATA_ATTEMPTS) {
+        stats.needsReview += rows.length;
+        await apply(
+          ids,
           { settled_at: nowIso(), settle_note: "needs manual grading: SportyBet returned no event data", settle_attempts: attempts, last_checked_at: nowIso() },
           false,
         );
@@ -268,15 +418,19 @@ async function settleTable(
     const finalScore = `${ev.ft.home}-${ev.ft.away}`;
     const htScore = ev.ht ? `${ev.ht.home}-${ev.ht.away}` : null;
     const groups = new Map<string, { patch: Record<string, unknown>; ids: string[] }>();
-    const ungraded: PendingRow[] = [];
+    const ungraded: { row: PendingRow; note: string }[] = [];
 
     for (const row of rows) {
-      const g = gradeSelection(row.pick_code, ev.ft, ev.ht);
+      const g = gradeSelection(row.pick_code, settlementScore(row.pick_code, ev), ev.ht);
       if (!g.result) {
-        ungraded.push(row);
+        ungraded.push({ row, note: g.note ?? "market can't be graded from the score" });
         continue;
       }
-      const note = g.note ?? null;
+      const regNote =
+        ev.regular && !sameScore(ev.regular, ev.ft) && !FULL_MATCH_MARKETS.has(row.pick_code ?? "")
+          ? `graded on regulation time ${ev.regular.home}-${ev.regular.away}`
+          : null;
+      const note = [g.note, regNote, ev.note].filter(Boolean).join("; ") || null;
       const key = `${g.result}|${note ?? ""}`;
       const entry = groups.get(key) ?? {
         patch: {
@@ -295,19 +449,16 @@ async function settleTable(
     for (const { patch, ids } of groups.values()) await apply(ids, patch);
 
     if (ungraded.length) {
-      const giveUp = ungraded.filter((r) => (r.settle_attempts ?? 0) + 1 >= MAX_UNGRADED_ATTEMPTS || age > CANCEL_AFTER_MS);
-      const retry = ungraded.filter((r) => !giveUp.includes(r));
-      if (giveUp.length || !v2) {
-        const list = v2 ? giveUp : ungraded;
-        stats.needsReview += list.length;
+      const giveUp = ungraded.filter(({ row }) => (row.settle_attempts ?? 0) + 1 >= MAX_UNGRADED_ATTEMPTS || age > PARK_AFTER_MS);
+      const retry = ungraded.filter((u) => !giveUp.includes(u)).map((u) => u.row);
+      const list = v2 ? giveUp : ungraded;
+      stats.needsReview += list.length;
+      const byNote = new Map<string, string[]>();
+      for (const { row, note } of list) byNote.set(note, [...(byNote.get(note) ?? []), row.id]);
+      for (const [note, noteIds] of byNote) {
         await apply(
-          list.map((r) => r.id),
-          {
-            final_score: finalScore,
-            ht_score: htScore,
-            settled_at: nowIso(),
-            settle_note: "needs manual grading: half-time score unavailable",
-          },
+          noteIds,
+          { final_score: finalScore, ht_score: htScore, settled_at: nowIso(), settle_note: `needs manual grading: ${note}` },
           false,
         );
       }
@@ -390,6 +541,39 @@ export async function snapshotClosingOdds(budgetMs: number): Promise<ClosingStat
     auditWarn("closing odds", e);
     return stats;
   }
+}
+
+/**
+ * Undo the old rule that turned "no final result after 72h" into `cancelled`.
+ * Only rows carrying exactly that automatic note are touched (never a manual
+ * or SportyBet-confirmed cancellation); they go back to pending for the
+ * settler. Returns rows reset per table.
+ */
+export async function resetStaleCancellations(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  const sb = auditDb();
+  if (!sb || auditDisabled()) return out;
+  const schema = await auditSchema();
+  const tables: [string, boolean][] = [[PREDICTION_LOG_TABLE, schema.v2]];
+  if (schema.candidates) tables.push([CANDIDATES_TABLE, true]);
+  for (const [table, v2] of tables) {
+    const patch = settlePatchFor(table, v2, {
+      result: "pending",
+      settled_at: null,
+      final_score: null,
+      settle_note: null,
+      result_source: null,
+      settle_attempts: 0,
+      last_checked_at: null,
+    });
+    const res = await withTimeout(
+      sb.from(table).update(patch, { count: "exact" }).eq("result", "cancelled").eq("settle_note", STALE_CANCEL_NOTE),
+      15_000,
+    );
+    if (res?.error) auditWarn(`${table} reset stale cancels`, res.error.message);
+    out[table] = res && !res.error ? (res.count ?? 0) : 0;
+  }
+  return out;
 }
 
 export type MaintenanceResult = {

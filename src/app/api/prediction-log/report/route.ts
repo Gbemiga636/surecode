@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { CANDIDATES_TABLE, PREDICTION_LOG_TABLE, auditSchema } from "@/lib/audit-db";
+import { CANDIDATES_TABLE, EVAL_VIEW, PREDICTION_LOG_TABLE, auditSchema } from "@/lib/audit-db";
+import { evalSelections, type EvalRow } from "@/lib/evaluation";
 import { checkPredictionLogAuth } from "@/lib/prediction-log-auth";
 import { V2_FILTERS, applyAuditFilters, parseAuditFilters } from "@/lib/prediction-log-query";
 import { buildReport, type CandidateRow, type ReportRow } from "@/lib/prediction-report";
@@ -19,8 +20,9 @@ const V1_COLUMNS =
 /**
  * GET /api/prediction-log/report — official performance summary (read-only).
  *
- * Same auth and filters as /api/prediction-log. Add `eval=1` to restrict to
- * the clean evaluation set (rows generated before kickoff, live or recovered).
+ * Same auth and filters as /api/prediction-log. Add `eval=1` for the
+ * evaluation set: leg metrics from v_eval_selections (unique, prospective,
+ * published, pre-kickoff, graded), recovered rows only as a separate breakdown.
  */
 export async function GET(request: Request) {
   const auth = checkPredictionLogAuth(request);
@@ -41,7 +43,9 @@ export async function GET(request: Request) {
       );
     }
     const sb = createAdminClient();
-    const columns = schema.v2 ? `${V1_COLUMNS}, product_tier, data_origin` : V1_COLUMNS;
+    const columns = schema.v2
+      ? `${V1_COLUMNS}, product_tier, data_origin, published, slot, predicted_before_kickoff, prediction_id`
+      : V1_COLUMNS;
 
     const rows: ReportRow[] = [];
     let truncated = false;
@@ -58,13 +62,37 @@ export async function GET(request: Request) {
       if (offset + PAGE >= MAX_ROWS) truncated = true;
     }
 
+    // eval=1: leg metrics come only from v_eval_selections (JS mirror until the migration is run).
+    let evalRows: ReportRow[] | undefined;
+    let legSource: string | null = null;
+    if (evalOnly) {
+      if (schema.evalV1) {
+        evalRows = [];
+        legSource = EVAL_VIEW;
+        for (let offset = 0; offset < MAX_ROWS; offset += PAGE) {
+          const { data, error } = await applyAuditFilters(sb.from(EVAL_VIEW).select(`${columns}, product, tier, devig_prob`), filters)
+            .order("prediction_id", { ascending: true })
+            .range(offset, offset + PAGE - 1);
+          if (error) {
+            console.error("[api/prediction-log/report] view", error.message);
+            return NextResponse.json({ ok: false, error: "Query failed" }, { status: 500, headers: NO_STORE });
+          }
+          evalRows.push(...((data ?? []) as unknown as ReportRow[]));
+          if (!data || data.length < PAGE) break;
+        }
+      } else {
+        legSource = "js-fallback (run sql/schema-eval-v1.sql)";
+        evalRows = evalSelections(rows as unknown as EvalRow[]) as unknown as ReportRow[];
+      }
+    }
+
     let candidates: CandidateRow[] | null = null;
     if (schema.candidates) {
       candidates = [];
       for (let offset = 0; offset < MAX_ROWS; offset += PAGE) {
         let cq = sb
           .from(CANDIDATES_TABLE)
-          .select("product_tier, market, sport, odds, status, result")
+          .select("product_tier, market, sport, odds, status, result, event_id, pick_code, evaluated_at")
           .in("result", ["win", "loss"]);
         if (filters.from) cq = cq.gte("kickoff", `${filters.from}T00:00:00.000Z`);
         if (filters.to) cq = cq.lt("kickoff", new Date(Date.parse(`${filters.to}T00:00:00.000Z`) + 86_400_000).toISOString());
@@ -89,8 +117,9 @@ export async function GET(request: Request) {
         generated_at: new Date().toISOString(),
         filters: { ...filters, eval: evalOnly },
         rows_considered: rows.length,
+        ...(evalRows ? { leg_source: legSource, eval_unique_selections: evalRows.length } : {}),
         truncated,
-        ...buildReport(rows, candidates),
+        ...buildReport(rows, candidates, evalRows),
       },
       { headers: NO_STORE },
     );

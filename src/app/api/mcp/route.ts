@@ -11,6 +11,7 @@ import { GET as health } from "@/app/api/gpt/health/route";
 import { GET as predictionLog } from "@/app/api/prediction-log/route";
 import { GET as performanceReport } from "@/app/api/prediction-log/report/route";
 import { GET as selectionLift } from "@/app/api/prediction-log/selection-lift/route";
+import { GET as evaluation } from "@/app/api/prediction-log/evaluation/route";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -171,6 +172,20 @@ const AUDIT_TOOLS: McpTool[] = [
       controls: int("Controls per selected pick, 1-10 (default 3)"),
     },
   ),
+  auditTool(
+    "get_evaluation",
+    "Evaluation layer (unique selections)",
+    "Official evaluation on unique selections from v_eval_selections: leg level, official slip level (published, by booking code) and customer slip level (booked at creation), Champion vs de-vigged market (Brier, log loss, ECE, skill, bootstrap 95% CIs) and integrity checks (view count, recovered rows, tier enum, overdue grading, engine versions, de-vig coverage).",
+    evaluation,
+    "/api/prediction-log/evaluation",
+    {
+      from: str("Start date YYYY-MM-DD (UTC, on created_at)"),
+      to: str("End date YYYY-MM-DD (UTC, inclusive)"),
+      product: str("Product", ["sure-engine", "plenty-codes", "predictions", "combo-builder", "user", "demo"]),
+      tier: str("Tier", ["safe", "boost", "longshot", "none"]),
+      bootstrap: int("Bootstrap iterations, 100-5000 (default 1000)"),
+    },
+  ),
 ];
 
 const TOOL_NAMES: [string, string][] = [
@@ -189,7 +204,8 @@ const AUDIT_NOTE = `
 ## Audit tools (full access only)
 - get_prediction_log: row-level published predictions with odds at prediction time, closing odds and results.
 - get_performance_report: official legs/slips/tier performance; pass eval=1 for the clean pre-kickoff set.
-- get_selection_lift: matched-control comparison of selected vs comparable rejected candidates. Never mix Safe, Boost and Longshot; quote n and the 95% interval; say "not enough data" when the interval is wide.`;
+- get_selection_lift: matched-control comparison of selected vs comparable rejected candidates. Never mix Safe, Boost and Longshot; quote n and the 95% interval; say "not enough data" when the interval is wide.
+- get_evaluation: the official numbers. Accuracy is on unique selections (the same leg is re-booked into many slips), legs / official slips / customer slips are separate levels, and model vs market compares the Champion with the de-vigged market on the same rows. Quote unique n and the bootstrap interval.`;
 
 const ERROR = (status: number, message: string, extra: Record<string, string> = {}) =>
   Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message } }, { status, headers: { ...NO_STORE, ...extra } });

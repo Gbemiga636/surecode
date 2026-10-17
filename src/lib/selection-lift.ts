@@ -66,10 +66,35 @@ const implied = (odds: LiftCandidate["odds"]) => {
 
 type Prepared = LiftCandidate & { p: number; lead: string; y: 0 | 1 };
 
-/** Graded (win/loss), priced, and evaluated before kickoff. */
+/**
+ * One row per unique selection (event_id, pick_code) within a tier. The
+ * candidate log keeps one row per day, so a fixture evaluated on two days
+ * appears twice. Keeps the earliest selected row when the engine ever
+ * selected it, otherwise the earliest rejected row.
+ */
+export function uniqueCandidates<T extends Pick<LiftCandidate, "event_id" | "pick_code" | "status" | "evaluated_at"> & { product_tier: string | null }>(
+  rows: T[],
+): T[] {
+  const best = new Map<string, T>();
+  const t = (r: T) => Date.parse(String(r.evaluated_at ?? "")) || Infinity;
+  for (const r of rows) {
+    const key = `${r.product_tier ?? ""}|${r.event_id}|${r.pick_code ?? ""}`;
+    const cur = best.get(key);
+    const better =
+      !cur ||
+      (r.status === "selected" && cur.status !== "selected") ||
+      (r.status === cur.status && t(r) < t(cur));
+    if (better) best.set(key, r);
+  }
+  return [...best.values()];
+}
+
+const selectionKey = (r: Pick<LiftCandidate, "event_id" | "pick_code">) => `${r.event_id}|${r.pick_code ?? ""}`;
+
+/** Graded (win/loss), priced, evaluated before kickoff, one row per unique selection. */
 function prepare(rows: LiftCandidate[]): Prepared[] {
   const out: Prepared[] = [];
-  for (const r of rows) {
+  for (const r of uniqueCandidates(rows)) {
     if (r.result !== "win" && r.result !== "loss") continue;
     const p = implied(r.odds);
     const lead = leadBucket(r.evaluated_at, r.kickoff);
@@ -143,6 +168,8 @@ const pct = (v: number | null) => (v == null ? null : Math.round(v * 1000) / 10)
 
 export type LiftRow = {
   group: string;
+  unique_selected_n: number;
+  unique_control_n: number;
   selected_n: number;
   selected_wins: number;
   selected_hit_rate_pct: number | null;
@@ -168,6 +195,8 @@ export function summarizePairs(group: string, pairs: MatchedPair[], minGroupSize
   const mean = (xs: Prepared[]) => (xs.length ? xs.reduce((a, r) => a + r.p, 0) / xs.length : null);
   return {
     group,
+    unique_selected_n: new Set(sel.map(selectionKey)).size,
+    unique_control_n: new Set(ctl.map(selectionKey)).size,
     selected_n: sel.length,
     selected_wins: sw,
     selected_hit_rate_pct: pct(sRate),
@@ -200,7 +229,8 @@ export function selectionLiftReport(rows: LiftCandidate[], opts: LiftOptions = D
     options: opts,
     coverage: {
       candidate_rows: rows.length,
-      graded_pre_kickoff_rows: prepare(rows).length,
+      unique_candidate_selections: uniqueCandidates(rows).length,
+      graded_pre_kickoff_unique: prepare(rows).length,
       eligible_selected: eligibleSelected,
       matched_selected: pairs.length,
       unmatched_selected: unmatched,

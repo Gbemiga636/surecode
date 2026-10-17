@@ -11,6 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { PICKS, type BookableLeg } from "./sporty";
+import { marketSnapshots } from "./market-snapshot";
 import {
   PREDICTION_LOG_TABLE,
   auditDisabled,
@@ -31,6 +32,15 @@ export { PREDICTION_LOG_TABLE };
  * UI-only deploys keep the version; the deployed commit goes to `app_commit`.
  */
 export const ENGINE_VERSION = "2026.10";
+
+/**
+ * sha256 of the code that decides Sure picks (see tests/champion-frozen.test.ts).
+ * The test fails when that code changes, so a new ENGINE_VERSION is required.
+ */
+export const CHAMPION_FINGERPRINT = {
+  version: "2026.10",
+  sha256: "1bd634513b887e083acc8da27aa1ed7b9a57c0433442ed8309f4722a394ea3cc",
+} as const;
 
 /**
  * Commits that changed the Sure engine before ENGINE_VERSION existed, used to
@@ -210,6 +220,27 @@ function toRows(slip: LogSlip): Record<string, unknown>[] {
 }
 
 /**
+ * Attach the full market at prediction time (all outcome odds, overround,
+ * proportional de-vig) to live rows. Recovered rows are never back-filled.
+ */
+export async function withMarketSnapshots(
+  rows: Record<string, unknown>[],
+  budgetMs: number,
+): Promise<Record<string, unknown>[]> {
+  const live = rows.filter((r) => r.data_origin !== "recovered");
+  if (!live.length) return rows;
+  const snaps = await marketSnapshots(
+    live.map((r) => ({ eventId: r.event_id as string, pickCode: r.pick_code as string | null })),
+    budgetMs,
+  );
+  return rows.map((r) => {
+    if (r.data_origin === "recovered") return r;
+    const s = snaps.get(`${r.event_id}|${r.pick_code}`);
+    return { ...r, market_odds: s?.market_odds ?? null, overround: s?.overround ?? null, devig_prob: s?.devig_prob ?? null };
+  });
+}
+
+/**
  * Record generated predictions. Never throws. Duplicate legs (same source,
  * slip and selection) are ignored, so re-running a crawl is harmless.
  */
@@ -224,6 +255,9 @@ export async function logPredictions(
     const usable = schema.v2 ? slips : slips.filter((s) => s && s.dataOrigin !== "recovered");
     let rows = usable.flatMap(toRows);
     if (!rows.length) return 0;
+    const started = Date.now();
+    const budget = opts.timeoutMs ?? 6_000;
+    if (schema.evalV1) rows = await withMarketSnapshots(rows, Math.min(3_000, budget * 0.4));
     if (schema.v2 && !schema.appCommit) {
       rows = rows.map(({ app_commit: _omit, ...rest }) => rest);
     }
@@ -237,7 +271,7 @@ export async function logPredictions(
     const res = await upsertChunks(PREDICTION_LOG_TABLE, rows, {
       onConflict: "dedupe_key",
       ignoreDuplicates: true,
-      timeoutMs: opts.timeoutMs ?? 6_000,
+      timeoutMs: Math.max(2_000, budget - (Date.now() - started)),
     });
     if (res.error) auditWarn("insert", res.error);
     return res.written;
