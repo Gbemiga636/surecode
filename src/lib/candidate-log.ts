@@ -18,6 +18,7 @@ import {
   withTimeout,
 } from "./audit-db";
 import { appCommit, modelVersion, withMarketSnapshots } from "./prediction-log";
+import { logShadowSelections } from "./shadow-log";
 
 export async function logCandidates(
   store: CandidateStore,
@@ -63,7 +64,10 @@ export async function logCandidates(
 
     if (schema.evalV1) {
       const commit = appCommit();
-      rows = (await withMarketSnapshots(rows, Math.min(4_000, timeoutMs * 0.25))).map((r) => ({ ...r, app_commit: commit }));
+      rows = (await withMarketSnapshots(rows, Math.min(4_000, timeoutMs * 0.25), { pFair: schema.evalV3 })).map((r) => ({
+        ...r,
+        app_commit: commit,
+      }));
     }
 
     // First evaluation of the day is kept; selected rows go first so a short
@@ -78,6 +82,11 @@ export async function logCandidates(
     });
     if (ins.error) auditWarn("candidates insert", ins.error);
     out.written = ins.written;
+
+    if (schema.evalV3) {
+      const left = timeoutMs - (Date.now() - started);
+      await logShadowSelections(ordered, Math.min(3_000, left * 0.3));
+    }
 
     // Anything that ended up in a published slip is always marked selected,
     // even if an earlier run of the day logged it as rejected. Odds, run and
@@ -101,6 +110,7 @@ export async function logCandidates(
                 ...(schema.evalV1
                   ? { market_odds: r.market_odds, overround: r.overround, devig_prob: r.devig_prob, app_commit: r.app_commit }
                   : {}),
+                ...(schema.evalV3 ? { p_fair: r.p_fair, devig_method: r.devig_method } : {}),
               })
               .eq("dedupe_key", String(r.dedupe_key)),
             left,

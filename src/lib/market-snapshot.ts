@@ -7,6 +7,7 @@
  */
 import { PICKS, cachedMarketBook, readMarketBook, type MarketBook } from "./sporty";
 import { withTimeout } from "./audit-db";
+import { P_FAIR_METHOD, fairProbFromMarket, type DevigMethod } from "./devig";
 
 const EVENT_API = "https://www.sportybet.com/api/ng/factsCenter/event?eventId=";
 const HEADERS = {
@@ -47,6 +48,9 @@ export type MarketSnapshot = {
   };
   overround: number;
   devig_prob: number;
+  /** Fair probability by the frozen B1 method (stored only once sql/schema-eval-v3.sql has run). */
+  p_fair: number | null;
+  devig_method: DevigMethod;
 };
 
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
@@ -67,21 +71,25 @@ export function snapshotFromBook(
   const sum = expected.reduce((a, id) => a + 1 / prices[id], 0);
   const devig = ((1 / prices[meta.outcomeId]) / sum) * k;
   if (!(devig > 0 && devig < 1)) return null;
+  const marketOdds = {
+    market_id: meta.marketId,
+    specifier: meta.specifier,
+    outcomes: Object.fromEntries(expected.map((id) => [id, prices[id]])),
+    picked_outcome: meta.outcomeId,
+    captured_at: capturedAt,
+    source,
+  };
+  const pFair = fairProbFromMarket(marketOdds, P_FAIR_METHOD);
   return {
-    market_odds: {
-      market_id: meta.marketId,
-      specifier: meta.specifier,
-      outcomes: Object.fromEntries(expected.map((id) => [id, prices[id]])),
-      picked_outcome: meta.outcomeId,
-      captured_at: capturedAt,
-      source,
-    },
+    market_odds: marketOdds,
     overround: r6(sum / k - 1),
     devig_prob: r6(devig),
+    p_fair: pFair == null ? null : r6(pFair),
+    devig_method: P_FAIR_METHOD,
   };
 }
 
-async function fetchEventBook(eventId: string, ms: number): Promise<MarketBook | null> {
+export async function fetchEventBook(eventId: string, ms: number): Promise<MarketBook | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1_000, ms));
   try {

@@ -10,6 +10,7 @@ import { PICKS, getAllSportyFixtures, settlePick } from "./sporty";
 import {
   CANDIDATES_TABLE,
   PREDICTION_LOG_TABLE,
+  SHADOW_TABLE,
   auditDb,
   auditDisabled,
   auditSchema,
@@ -45,12 +46,16 @@ const MAX_NO_DATA_ATTEMPTS = 12;
 /** Fake cancellations written by the old 72h rule; reset once so the fixed settler grades them. */
 export const STALE_CANCEL_NOTE = "No final result 72h after kickoff";
 export const NO_RESULT_PARK_NOTE = "needs manual grading: no final result from SportyBet";
+export const MANUAL_NOTE_PREFIX = "needs manual grading";
+/** Prefix of the note on rows voided because SportyBet never published a gradeable result. */
+export const UNRESOLVED_VOID_PREFIX = "void: no gradeable result from SportyBet 7 days after kickoff";
 
 type Score = { home: number; away: number };
 export type EventSport = "football" | "basketball" | "tennis" | "hockey" | "baseball";
 
 export type EventResult = {
-  state: "ended" | "live" | "not_started" | "postponed" | "cancelled" | "unknown";
+  /** `retired`: retirement / walkover — SportyBet voids every market not already decided. */
+  state: "ended" | "live" | "not_started" | "postponed" | "cancelled" | "retired" | "unknown";
   /** Final score including overtime / extra innings (sets for tennis). */
   ft: Score | null;
   /** Regulation-time score (90 min, 3 periods, 9 innings). Null when it can't be established. */
@@ -127,6 +132,19 @@ function bestOfFive(d: Record<string, unknown>): boolean {
   return /australian open|roland garros|french open|wimbledon|us open|davis cup/i.test(name) && !/wta|women|ladies|itf|mixed|doubles/i.test(name);
 }
 
+/** Sets won per player, counting only finished sets (6+ games with a 2-game lead, 7-6, or a 10-point match tiebreak). */
+function completedSets(games: Score[]): Score {
+  const out = { home: 0, away: 0 };
+  for (const g of games) {
+    const hi = Math.max(g.home, g.away);
+    const lo = Math.min(g.home, g.away);
+    if (!((hi >= 6 && hi - lo >= 2) || (hi === 7 && lo === 6))) continue;
+    if (g.home > g.away) out.home++;
+    else out.away++;
+  }
+  return out;
+}
+
 /**
  * Turn a SportyBet event payload into a gradeable result (pure, for tests).
  * Handles what the old rules missed: "PostMatch" as ended, ITF feeds that
@@ -142,7 +160,7 @@ export function parseEventResult(d: Record<string, unknown>): EventResult {
   const base = { sport, startTime, regular: null, ht: null } as const;
 
   if (/cancel|abandon/.test(matchStatus)) return { ...base, state: "cancelled", ft: null, note: String(d.matchStatus) };
-  if (/retire|walkover|w\.o\./.test(matchStatus)) return { ...base, state: "unknown", ft: null, note: `retirement / walkover (${d.matchStatus})` };
+  if (/retire|walkover|w\.o\./.test(matchStatus)) return { ...base, state: "retired", ft: null, note: `retirement / walkover (${d.matchStatus})` };
   if (/postpon|delayed|interrupt|suspend/.test(matchStatus)) return { ...base, state: "postponed", ft: null, note: String(d.matchStatus) };
 
   let ft: Score | null = null;
@@ -157,17 +175,25 @@ export function parseEventResult(d: Record<string, unknown>): EventResult {
 
   if (!ended && !ft && (statusNum === 0 || /not start/.test(matchStatus))) return { ...base, state: "not_started", ft: null };
 
-  // ITF feeds often freeze on "set 2" after the last point; a decided set score is final.
-  if (!ended && ft && sport === "tennis") {
-    const need = bestOfFive(d) ? 3 : 2;
-    if (Math.max(ft.home, ft.away) >= need && ft.home !== ft.away) {
-      ended = true;
-      note = "final inferred from decided set score (feed did not flip to Ended)";
-    }
-  }
-
   const rawPeriods = Array.isArray(d.gameScore) ? d.gameScore : Array.isArray(d.periodScores) ? d.periodScores : [];
   const periods = parsePeriods(rawPeriods) ?? [];
+
+  // ITF feeds often freeze on "set 2" after the last point; a decided set score is final.
+  if (!ended && sport === "tennis") {
+    const need = bestOfFive(d) ? 3 : 2;
+    if (ft && Math.max(ft.home, ft.away) >= need && ft.home !== ft.away) {
+      ended = true;
+      note = "final inferred from decided set score (feed did not flip to Ended)";
+    } else {
+      // Bet Genius ITF feeds can also stop before the set score updates: count completed sets from the game scores.
+      const sets = completedSets(periods);
+      if (Math.max(sets.home, sets.away) >= need && sets.home !== sets.away) {
+        ft = sets;
+        ended = true;
+        note = "final inferred from completed set game scores (feed stalled)";
+      }
+    }
+  }
   const periodsMatchFinal = Boolean(ft && periods.length && sameScore(sumScores(periods), ft));
 
   let ht: Score | null = null;
@@ -269,6 +295,7 @@ type PendingRow = {
   pick_code: string | null;
   kickoff: string;
   settle_attempts?: number | null;
+  settle_note?: string | null;
 };
 
 export type SettleStats = { checked: number; settled: number; events: number; needsReview: number };
@@ -289,7 +316,7 @@ async function settleTable(
   const left = () => end - Date.now();
   const nowIso = () => new Date().toISOString();
 
-  const columns = v2 ? "id, event_id, pick_code, kickoff, settle_attempts" : "id, event_id, pick_code, kickoff";
+  const columns = v2 ? "id, event_id, pick_code, kickoff, settle_attempts, settle_note" : "id, event_id, pick_code, kickoff";
   let query = sb
     .from(table)
     .select(columns)
@@ -305,15 +332,14 @@ async function settleTable(
   }
   const due = [...((res.data ?? []) as unknown as PendingRow[])];
 
-  // Parked "no final result" rows get re-checked for a week so late results still grade automatically.
+  // Parked rows keep being re-checked so late results still grade automatically; after a week they are voided.
   if (v2 && left() > 4_000) {
     const parked = await withTimeout(
       sb
         .from(table)
         .select(columns)
         .eq("result", "pending")
-        .eq("settle_note", NO_RESULT_PARK_NOTE)
-        .gt("kickoff", new Date(Date.now() - PARKED_RETRY_MS).toISOString())
+        .like("settle_note", `${MANUAL_NOTE_PREFIX}%`)
         .order("last_checked_at", { ascending: true, nullsFirst: true })
         .limit(Math.max(20, Math.floor(limit / 4))),
       Math.min(6_000, left()),
@@ -371,6 +397,19 @@ async function settleTable(
       return;
     }
 
+    if (ev?.state === "retired") {
+      await apply(ids, {
+        result: "void",
+        settled_at: nowIso(),
+        settle_note: `void: ${ev.note ?? "retirement / walkover"} (SportyBet voids undecided markets)`,
+        result_source: "auto",
+      });
+      return;
+    }
+
+    const unresolvedVoid = (reason: string) =>
+      apply(ids, { result: "void", settled_at: nowIso(), settle_note: `${UNRESOLVED_VOID_PREFIX} (${reason})`, result_source: "auto" });
+
     if (ev && (ev.state === "not_started" || ev.state === "postponed")) {
       const moved = rescheduledBy(ev, oldest);
       if ((moved != null && moved > POSTPONED_VOID_MS) || (ev.state === "postponed" && age > POSTPONED_VOID_MS)) {
@@ -388,7 +427,11 @@ async function settleTable(
 
     if (!ev || ev.state !== "ended" || !ev.ft) {
       const attempts = Math.min(...rows.map((r) => r.settle_attempts ?? 0)) + 1;
-      if (ev && age > PARK_AFTER_MS && (!v2 || attempts >= MIN_PARK_ATTEMPTS)) {
+      // A failed lookup only voids rows already parked for missing event data (never on one timeout).
+      const noData = rows.every((r) => r.settle_note?.includes("no event data"));
+      if (v2 && age > PARKED_RETRY_MS && (ev || (noData && attempts >= MAX_NO_DATA_ATTEMPTS))) {
+        await unresolvedVoid(ev ? "no final result" : "no event data");
+      } else if (ev && age > PARK_AFTER_MS && (!v2 || attempts >= MIN_PARK_ATTEMPTS)) {
         // SportyBet answers but has no final result: never invent a cancellation, park for a human
         // (parked rows keep being re-checked, so a late result still grades automatically).
         stats.needsReview += rows.length;
@@ -396,7 +439,7 @@ async function settleTable(
           ids,
           {
             settled_at: nowIso(),
-            settle_note: ev.note?.startsWith("retirement") ? `needs manual grading: ${ev.note}` : NO_RESULT_PARK_NOTE,
+            settle_note: NO_RESULT_PARK_NOTE,
             settle_attempts: attempts,
             last_checked_at: nowIso(),
           },
@@ -448,7 +491,20 @@ async function settleTable(
     }
     for (const { patch, ids } of groups.values()) await apply(ids, patch);
 
-    if (ungraded.length) {
+    if (ungraded.length && v2 && age > PARKED_RETRY_MS) {
+      const byNote = new Map<string, string[]>();
+      for (const { row, note } of ungraded) byNote.set(note, [...(byNote.get(note) ?? []), row.id]);
+      for (const [note, noteIds] of byNote) {
+        await apply(noteIds, {
+          result: "void",
+          final_score: finalScore,
+          ht_score: htScore,
+          settled_at: nowIso(),
+          settle_note: `${UNRESOLVED_VOID_PREFIX} (${note})`,
+          result_source: "auto",
+        });
+      }
+    } else if (ungraded.length) {
       const giveUp = ungraded.filter(({ row }) => (row.settle_attempts ?? 0) + 1 >= MAX_UNGRADED_ATTEMPTS || age > PARK_AFTER_MS);
       const retry = ungraded.filter((u) => !giveUp.includes(u)).map((u) => u.row);
       const list = v2 ? giveUp : ungraded;
@@ -580,6 +636,8 @@ export type MaintenanceResult = {
   closing: ClosingStats;
   predictions: SettleStats;
   candidates: SettleStats;
+  /** Brief v3 D2 shadow selections. */
+  shadow: SettleStats;
   ms: number;
 };
 
@@ -600,6 +658,7 @@ export async function runAuditMaintenance(opts: {
     closing: { rows: 0, updated: 0, feedEvents: 0 },
     predictions: { ...empty },
     candidates: { ...empty },
+    shadow: { ...empty },
     ms: 0,
   };
   try {
@@ -617,6 +676,9 @@ export async function runAuditMaintenance(opts: {
       out.closing = await snapshotClosingOdds(Math.min(30_000, left() * 0.35));
     }
     out.predictions = await settleTable(PREDICTION_LOG_TABLE, schema.v2, cache, Math.min(45_000, left() * 0.6), 400);
+    if (schema.evalV3 && left() > 4_000) {
+      out.shadow = await settleTable(SHADOW_TABLE, true, cache, Math.min(15_000, left() * 0.4), 600);
+    }
     if (schema.candidates && left() > 4_000) {
       out.candidates = await settleTable(CANDIDATES_TABLE, true, cache, left() - 1_000, 1_500);
     }

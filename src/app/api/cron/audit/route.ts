@@ -1,22 +1,11 @@
 import { NextResponse } from "next/server";
 import { recoverStoredSureCodes } from "@/lib/prediction-recover";
 import { resetStaleCancellations, runAuditMaintenance } from "@/lib/prediction-settle";
+import { isCronAuthorized as isAuthorized } from "@/lib/cron-auth";
 
 export const maxDuration = 90;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-/** Same secrets as /api/crawl: Vercel Cron's CRON_SECRET, or CRAWL_SECRET for manual runs. */
-function isAuthorized(request: Request): boolean {
-  const crawlSecret = process.env.CRAWL_SECRET || "";
-  const cronSecret = process.env.CRON_SECRET || "";
-  const hdr = request.headers.get("x-crawl-secret") || "";
-  const auth = request.headers.get("authorization") || "";
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (crawlSecret && (hdr === crawlSecret || bearer === crawlSecret)) return true;
-  if (cronSecret && bearer === cronSecret) return true;
-  return false;
-}
 
 const BUDGET_MS = 75_000;
 

@@ -226,6 +226,7 @@ function toRows(slip: LogSlip): Record<string, unknown>[] {
 export async function withMarketSnapshots(
   rows: Record<string, unknown>[],
   budgetMs: number,
+  opts: { pFair?: boolean } = {},
 ): Promise<Record<string, unknown>[]> {
   const live = rows.filter((r) => r.data_origin !== "recovered");
   if (!live.length) return rows;
@@ -236,8 +237,27 @@ export async function withMarketSnapshots(
   return rows.map((r) => {
     if (r.data_origin === "recovered") return r;
     const s = snaps.get(`${r.event_id}|${r.pick_code}`);
-    return { ...r, market_odds: s?.market_odds ?? null, overround: s?.overround ?? null, devig_prob: s?.devig_prob ?? null };
+    return {
+      ...r,
+      market_odds: s?.market_odds ?? null,
+      overround: s?.overround ?? null,
+      devig_prob: s?.devig_prob ?? null,
+      ...(opts.pFair ? { p_fair: s?.p_fair ?? null, devig_method: s?.p_fair != null ? s.devig_method : null } : {}),
+    };
   });
+}
+
+const CUSTOMER_SOURCES: ReadonlySet<LogSource> = new Set(["book", "builder", "sure-combine"]);
+
+/**
+ * A customer slip (book / builder / sure-combine) whose first leg had already
+ * kicked off when it was logged. Those are never logged: they would be graded
+ * on matches that had started or finished (booking itself is unaffected).
+ */
+export function lateCustomerSlip(slip: LogSlip, now = Date.now()): boolean {
+  if (!slip || !CUSTOMER_SOURCES.has(slip.source) || slip.dataOrigin === "recovered") return false;
+  const kicks = (slip.legs ?? []).map((l) => Date.parse(isoTime(l.kickoff) ?? "")).filter(Number.isFinite);
+  return kicks.length > 0 && Math.min(...kicks) <= now;
 }
 
 /**
@@ -252,12 +272,16 @@ export async function logPredictions(
     if (auditDisabled() || !Array.isArray(slips) || !slips.length || !auditDb()) return 0;
     const schema = await auditSchema();
     // Without the v2 columns a recovered row can't be told apart from a live one.
-    const usable = schema.v2 ? slips : slips.filter((s) => s && s.dataOrigin !== "recovered");
+    const usable = (schema.v2 ? slips : slips.filter((s) => s && s.dataOrigin !== "recovered")).filter((s) => {
+      if (!lateCustomerSlip(s)) return true;
+      auditWarn("late slip", `${s.source} ${s.slipCode ?? ""} not logged: created after its first kickoff`);
+      return false;
+    });
     let rows = usable.flatMap(toRows);
     if (!rows.length) return 0;
     const started = Date.now();
     const budget = opts.timeoutMs ?? 6_000;
-    if (schema.evalV1) rows = await withMarketSnapshots(rows, Math.min(3_000, budget * 0.4));
+    if (schema.evalV1) rows = await withMarketSnapshots(rows, Math.min(3_000, budget * 0.4), { pFair: schema.evalV3 });
     if (schema.v2 && !schema.appCommit) {
       rows = rows.map(({ app_commit: _omit, ...rest }) => rest);
     }

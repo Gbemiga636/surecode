@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "crawl": "tsx scripts/crawl.ts",
-    "test": "node --import tsx --test tests/settle.test.ts tests/prediction-log.test.ts tests/report.test.ts tests/engine-trace.test.ts tests/selection-lift.test.ts tests/mcp.test.ts tests/evaluation.test.ts tests/champion-frozen.test.ts"
+    "test": "node --import tsx --test tests/settle.test.ts tests/prediction-log.test.ts tests/report.test.ts tests/engine-trace.test.ts tests/selection-lift.test.ts tests/mcp.test.ts tests/evaluation.test.ts tests/champion-frozen.test.ts tests/v3.test.ts"
   },
   "dependencies": {
     "@netlify/functions": "^2.8.2",

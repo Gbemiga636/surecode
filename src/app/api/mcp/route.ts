@@ -12,6 +12,7 @@ import { GET as predictionLog } from "@/app/api/prediction-log/route";
 import { GET as performanceReport } from "@/app/api/prediction-log/report/route";
 import { GET as selectionLift } from "@/app/api/prediction-log/selection-lift/route";
 import { GET as evaluation } from "@/app/api/prediction-log/evaluation/route";
+import { GET as v3Report } from "@/app/api/prediction-log/v3/route";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -186,6 +187,21 @@ const AUDIT_TOOLS: McpTool[] = [
       bootstrap: int("Bootstrap iterations, 100-5000 (default 1000)"),
     },
   ),
+  auditTool(
+    "get_v3_report",
+    "Evaluation v3 (sharp-line test)",
+    "Brief v3 weekly report and sections: phase progress with acceptance checks, integrity (view count, manual-grading backlog, late slips, engine version, de-vig / p_fair / closing / sharp coverage), frozen hypotheses (n, hit rate vs p_fair, CLV with CI, ROI), Phase 0 gap test, de-vig method test, coverage table and the descriptive pattern scanner.",
+    v3Report,
+    "/api/prediction-log/v3",
+    {
+      section: str("Report section (default weekly)", ["weekly", "coverage", "devig", "patterns", "phase0", "sharp", "mapping-sample", "hypotheses"]),
+      from: str("Start date YYYY-MM-DD (default 2026-10-17)"),
+      to: str("End date YYYY-MM-DD (UTC, inclusive)"),
+      min_n: int("patterns: minimum n per cell (default 400)"),
+      threshold: { type: "number", description: "phase0: gap threshold (default 0.03)" },
+      n: int("mapping-sample: rows (default 200)"),
+    },
+  ),
 ];
 
 const TOOL_NAMES: [string, string][] = [
@@ -205,7 +221,8 @@ const AUDIT_NOTE = `
 - get_prediction_log: row-level published predictions with odds at prediction time, closing odds and results.
 - get_performance_report: official legs/slips/tier performance; pass eval=1 for the clean pre-kickoff set.
 - get_selection_lift: matched-control comparison of selected vs comparable rejected candidates. Never mix Safe, Boost and Longshot; quote n and the 95% interval; say "not enough data" when the interval is wide.
-- get_evaluation: the official numbers. Accuracy is on unique selections (the same leg is re-booked into many slips), legs / official slips / customer slips are separate levels, and model vs market compares the Champion with the de-vigged market on the same rows. Quote unique n and the bootstrap interval.`;
+- get_evaluation: the official numbers. Accuracy is on unique selections (the same leg is re-booked into many slips), legs / official slips / customer slips are separate levels, and model vs market compares the Champion with the de-vigged market on the same rows. Quote unique n and the bootstrap interval.
+- get_v3_report: the Brief v3 sharp-line test. Hypotheses are frozen and only rows created after frozen_at count; a verdict needs min_n (H3 150, H1/H2 800). Pattern-scanner cells are labelled "hypothesis" and are never picks. Shadow selections and sharp prices are internal: never present them as tips.`;
 
 const ERROR = (status: number, message: string, extra: Record<string, string> = {}) =>
   Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message } }, { status, headers: { ...NO_STORE, ...extra } });

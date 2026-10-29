@@ -11,6 +11,13 @@ export const PREDICTION_LOG_TABLE = "prediction_log";
 export const CANDIDATES_TABLE = "prediction_candidates";
 /** One row per unique published prospective selection (sql/schema-eval-v1.sql). */
 export const EVAL_VIEW = "v_eval_selections";
+/** sql/schema-eval-v3.sql */
+export const SHARP_ODDS_TABLE = "sc_sharp_odds";
+export const EVENT_MAP_TABLE = "sc_event_map";
+export const LINE_PROBE_TABLE = "sc_line_probe";
+export const HYPOTHESES_TABLE = "sc_hypotheses";
+export const SHADOW_TABLE = "sc_shadow_selections";
+export const SHADOW_VIEW = "v_shadow_eval";
 
 export const auditDisabled = () => process.env.PREDICTION_LOG_DISABLED === "1";
 
@@ -57,8 +64,10 @@ export async function withTimeout<T>(work: PromiseLike<T>, ms: number): Promise<
  * `appCommit`: the column added in a later revision of the v2 migration.
  * `evalV1`: sql/schema-eval-v1.sql (product / tier columns, market snapshot
  * columns on both tables, v_eval_selections view).
+ * `evalV3`: sql/schema-eval-v3.sql (p_fair / sporty_close columns, sharp,
+ * hypothesis and shadow tables).
  */
-export type AuditSchema = { v2: boolean; candidates: boolean; appCommit: boolean; evalV1: boolean };
+export type AuditSchema = { v2: boolean; candidates: boolean; appCommit: boolean; evalV1: boolean; evalV3: boolean };
 
 let schemaCache: { at: number; value: AuditSchema } | null = null;
 
@@ -68,24 +77,33 @@ let schemaCache: { at: number; value: AuditSchema } | null = null;
  */
 export async function auditSchema(): Promise<AuditSchema> {
   if (schemaCache && Date.now() - schemaCache.at < 10 * 60_000) return schemaCache.value;
-  const value: AuditSchema = { v2: false, candidates: false, appCommit: false, evalV1: false };
+  const value: AuditSchema = { v2: false, candidates: false, appCommit: false, evalV1: false, evalV3: false };
   try {
     const sb = auditDb();
     if (!sb) return value;
-    const [v2, cand, commit, evalLog, evalCand, evalView] = await Promise.all([
+    const checks = await Promise.all([
       withTimeout(sb.from(PREDICTION_LOG_TABLE).select("prediction_id, settle_attempts").limit(1), 5_000),
       withTimeout(sb.from(CANDIDATES_TABLE).select("id").limit(1), 5_000),
       withTimeout(sb.from(PREDICTION_LOG_TABLE).select("app_commit").limit(1), 5_000),
       withTimeout(sb.from(PREDICTION_LOG_TABLE).select("product, tier, devig_prob").limit(1), 5_000),
       withTimeout(sb.from(CANDIDATES_TABLE).select("devig_prob, app_commit").limit(1), 5_000),
       withTimeout(sb.from(EVAL_VIEW).select("event_id").limit(1), 5_000),
+      withTimeout(sb.from(PREDICTION_LOG_TABLE).select("p_fair, devig_method, sporty_close, sporty_close_at").limit(1), 5_000),
+      withTimeout(sb.from(CANDIDATES_TABLE).select("p_fair, devig_method").limit(1), 5_000),
+      withTimeout(sb.from(SHADOW_VIEW).select("id, clv_sharp").limit(1), 5_000),
+      withTimeout(sb.from(HYPOTHESES_TABLE).select("id").limit(1), 5_000),
+      withTimeout(sb.from(LINE_PROBE_TABLE).select("id").limit(1), 5_000),
+      withTimeout(sb.from(EVAL_VIEW).select("clv_sporty").limit(1), 5_000),
     ]);
-    value.v2 = Boolean(v2 && !v2.error);
-    value.candidates = Boolean(cand && !cand.error);
-    value.appCommit = value.v2 && Boolean(commit && !commit.error);
-    value.evalV1 = [evalLog, evalCand, evalView].every((r) => r && !r.error);
+    const [v2, cand, commit, evalLog, evalCand, evalView] = checks;
+    const ok = (r: (typeof checks)[number]) => Boolean(r && !r.error);
+    value.v2 = ok(v2);
+    value.candidates = ok(cand);
+    value.appCommit = value.v2 && ok(commit);
+    value.evalV1 = [evalLog, evalCand, evalView].every(ok);
+    value.evalV3 = value.evalV1 && checks.slice(6).every(ok);
     // Only cache a definite answer; a timeout is retried next call.
-    if (v2 && cand && commit && evalLog && evalCand && evalView) schemaCache = { at: Date.now(), value };
+    if (checks.every(Boolean)) schemaCache = { at: Date.now(), value };
   } catch (e) {
     auditWarn("schema check", e);
   }
