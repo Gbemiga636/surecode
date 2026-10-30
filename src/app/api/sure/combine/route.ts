@@ -4,6 +4,8 @@ import { T } from "@/lib/db";
 import { createBookingCode, sportyOpenUrl, type BookableLeg } from "@/lib/sporty";
 import { slipToLog } from "@/lib/prediction-log";
 import { logPredictionsAfterResponse } from "@/lib/prediction-log-after";
+import { safeComboBookable, safeComboPoolId } from "@/lib/safe-combo-build";
+import type { SafeComboPayload } from "@/lib/safe-combo";
 
 export const maxDuration = 30;
 export const dynamic = "force-dynamic";
@@ -54,6 +56,11 @@ export async function POST(request: Request) {
           board.set(`${leg.eventId}|${leg.pickCode}`, leg);
         }
       }
+    }
+    const { data: safeCombo } = await supabase.from(T.pickPools).select("payload").eq("id", safeComboPoolId(day)).maybeSingle();
+    for (const leg of safeComboBookable((safeCombo?.payload as SafeComboPayload) ?? null)) {
+      const key = `${leg.eventId}|${leg.pickCode}`;
+      if (!board.has(key)) board.set(key, leg);
     }
 
     const now = Date.now();

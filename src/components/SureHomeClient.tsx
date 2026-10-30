@@ -8,6 +8,7 @@ import { ReadMore } from "@/components/ReadMore";
 import { SportChip } from "@/components/SureArena";
 import { SureModePicker, type SureModeChoice } from "@/components/SureModePicker";
 import { modeForSlot, modeLabel } from "@/lib/sure-mode";
+import type { SafeComboPayload } from "@/lib/safe-combo";
 
 function sportyOpenUrl(code: string) {
   return `https://www.sportybet.com/ng/?shareCode=${encodeURIComponent(code)}`;
@@ -65,11 +66,13 @@ function formatKick(ms?: number) {
 export function SureHomeClient({
   day,
   codes,
+  safeCombo = null,
   initialMode = "safe",
   fromUrl = false,
 }: {
   day: string;
   codes: SureHomeCode[];
+  safeCombo?: SafeComboPayload | null;
   initialMode?: SureModeChoice;
   fromUrl?: boolean;
 }) {
@@ -208,9 +211,11 @@ export function SureHomeClient({
     }
   }
 
-  const latest = filtered[0];
+  const combo = mode === "safe" ? safeCombo?.combo ?? null : null;
+  const singles = mode === "safe" ? (safeCombo?.picks ?? []).filter((p) => p.code) : [];
+  const latest = combo ? undefined : filtered[0];
   const emptyBoost = mode === "boost" && filtered.length === 0;
-  const emptySafe = mode === "safe" && filtered.length === 0;
+  const emptySafe = mode === "safe" && filtered.length === 0 && !combo && !singles.length;
   const emptyLong = mode === "longshot" && filtered.length === 0;
 
   return (
@@ -290,7 +295,137 @@ export function SureHomeClient({
         </div>
       )}
 
-      {!filtered.length && !emptyBoost && !emptySafe && !emptyLong && (
+      {combo && (
+        <section className="hero-panel hero-sport sc-rise mb-6" aria-labelledby="safe-combo-title">
+          <span className="hero-aurora" aria-hidden />
+          <span className="hero-ring" aria-hidden />
+          <div className="hero-arena" aria-hidden>
+            <div className="hero-odds-stack">
+              <span>ODDS</span>
+              <strong>{combo.totalOdds.toFixed(2)}</strong>
+              <em>{combo.legs.length} games</em>
+            </div>
+          </div>
+          <div className="relative z-[2] p-6 pr-[200px] max-[900px]:pr-6 sm:p-8 sm:pr-[220px]">
+            <p className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
+              Today&apos;s Safe combo · one code
+            </p>
+            <p
+              id="safe-combo-title"
+              className="mt-3 font-mono text-3xl font-extrabold tracking-[0.14em] text-[var(--ink)] sm:text-5xl"
+            >
+              {combo.code}
+            </p>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Odds <span className="font-semibold text-[var(--ink)]">{combo.totalOdds.toFixed(2)}</span>
+              {" · "}
+              {combo.legs.length} of the day&apos;s surest games
+              {" · "}~{Math.round(combo.chance * 100)}% market-estimated chance all win
+            </p>
+            <ul className="mt-4 space-y-1">
+              {combo.legs.map((leg) => {
+                const kick = formatKick(leg.kickoff);
+                return (
+                  <li key={legKey(leg)} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="min-w-0">
+                      <span className="font-semibold text-[var(--ink)]">
+                        {leg.home} <span className="font-normal text-[var(--muted)]">vs</span> {leg.away}
+                      </span>
+                      <span className="text-[var(--muted)]">
+                        {" "}
+                        · {leg.pickLabel}
+                        {kick ? ` · ${kick}` : ""}
+                      </span>
+                    </span>
+                    <span className="font-mono font-bold text-[var(--accent-deep)]">{leg.odds.toFixed(2)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="mt-5">
+              <CodeActions code={combo.code} openUrl={combo.url || sportyOpenUrl(combo.code)} />
+            </div>
+            {combo.rationale && (
+              <div className="analysis-panel mt-5">
+                <p className="analysis-kicker">Why these games</p>
+                <ReadMore text={combo.rationale} limit={220} />
+              </div>
+            )}
+            <p className="mt-3 text-xs text-[var(--muted)]">
+              Every game must win. Fewer, stronger games give a better chance than many tiny ones at the same odds.
+              Not a guarantee.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {mode === "safe" && !combo && safeCombo?.note && singles.length > 0 && (
+        <p className="cb-hint">
+          <Icon name="shield" size={15} />
+          {safeCombo.note}
+        </p>
+      )}
+
+      {singles.length > 0 && (
+        <section className="sc-card sc-rise mb-6 overflow-hidden p-0" aria-labelledby="safe-singles-title">
+          <div className="border-b border-[var(--line)] px-5 py-4 sm:px-6">
+            <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
+              Prefer them one by one?
+            </p>
+            <h3 id="safe-singles-title" className="mt-1 font-display text-lg font-bold text-[var(--ink)]">
+              {singles.length} Safe picks, each with its own code
+            </h3>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Tick any of them to build your own combined code.
+            </p>
+          </div>
+          <ul className="space-y-1 px-3 pb-3 pt-2 sm:px-4">
+            {singles.map((p) => {
+              const leg: SureHomeLeg = p;
+              const kick = formatKick(p.kickoff);
+              const canPick = selectable(leg);
+              const on = picked.has(legKey(leg));
+              return (
+                <li key={legKey(p)} className={`cb-leg flex-wrap${on ? " is-on" : ""}`}>
+                  <button
+                    type="button"
+                    className={`cb-pick${on ? " is-on" : ""}`}
+                    aria-pressed={on}
+                    aria-label={`${on ? "Remove" : "Add"} ${p.home} vs ${p.away} — ${p.pickLabel}`}
+                    disabled={!canPick}
+                    title={!canPick ? "Match already started" : on ? "Remove from your code" : "Add to your code"}
+                    onClick={() => toggleLeg(leg)}
+                  >
+                    <Icon name="check" size={14} />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-[var(--ink)]">
+                      {p.home} <span className="font-normal text-[var(--muted)]">vs</span> {p.away}
+                    </p>
+                    <p className="mt-0.5 text-[var(--muted)]">
+                      {p.pickLabel}
+                      {kick ? ` · ${kick}` : ""} · ~{Math.round(p.chance * 100)}% · code{" "}
+                      <span className="font-mono font-semibold text-[var(--ink)]">{p.code}</span>
+                    </p>
+                  </div>
+                  <span className="font-mono text-base font-bold text-[var(--accent-deep)]">{p.odds.toFixed(2)}</span>
+                  <div className="w-full pl-9 pt-1">
+                    <CodeActions code={p.code!} openUrl={p.url || sportyOpenUrl(p.code!)} like={false} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {mode === "safe" && (combo || singles.length > 0) && filtered.length > 0 && (
+        <p className="mb-3 text-[0.65rem] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+          Engine Safe slips
+        </p>
+      )}
+
+      {!filtered.length && !emptyBoost && !emptySafe && !emptyLong && !combo && !singles.length && (
         <div className="sc-empty sc-rise">
           <p className="font-display text-lg font-bold text-[var(--ink)]">Arena warming up</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--muted)]">

@@ -82,7 +82,8 @@ export type LogSource =
   | "builder"
   | "edit-code"
   | "demo-auto"
-  | "sure-combine";
+  | "sure-combine"
+  | "safe-combo";
 
 export type LogResult = "pending" | "win" | "loss" | "void" | "cancelled";
 
@@ -95,6 +96,7 @@ const MODEL_NAME: Record<LogSource, string> = {
   "edit-code": "edit-code",
   "demo-auto": "demo-auto",
   "sure-combine": "sure-combine",
+  "safe-combo": "safe-combo",
 };
 
 /** Sources whose output the system itself shows to customers. */
@@ -107,6 +109,7 @@ const PUBLISHED: Record<LogSource, boolean> = {
   "edit-code": false,
   "demo-auto": false,
   "sure-combine": false,
+  "safe-combo": true,
 };
 
 export type LogLeg = {

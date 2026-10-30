@@ -8,15 +8,20 @@ import { HeroSlider, type Slide } from "@/components/HeroSlider";
 import { OddsTicker, type TickerItem } from "@/components/OddsTicker";
 import { Icon, type IconName } from "@/components/Icons";
 import type { SureModeChoice } from "@/components/SureModePicker";
+import { after } from "next/server";
+import { buildSafeCombo, safeComboPoolId } from "@/lib/safe-combo-build";
+import { safeComboSignature, type SafeComboPayload } from "@/lib/safe-combo";
 
 export const dynamic = "force-dynamic";
+/** Room for a Safe combo build started after the response (see `after` below). */
+export const maxDuration = 120;
 
 const PROMOS: Slide[] = [
   {
     id: "safe",
-    kicker: "Safe · slots 1–3",
-    title: "Short favourites for steady bankroll",
-    body: "Tight singles and doubles. Open the code straight in SportyBet.",
+    kicker: "Safe · daily combo",
+    title: "The day's surest legs in one code",
+    body: "One combined Safe code around 2 odds, plus 6–8 single picks if you prefer them one by one.",
     image:
       "https://images.unsplash.com/photo-1522778119026-d647f0596c20?auto=format&fit=crop&w=1600&q=80",
     href: "/home?mode=safe#board",
@@ -102,6 +107,17 @@ export default async function HomePage({
   }
   const stale = boardDay !== day && rows.length > 0;
 
+  const { data: comboRow } = await supabase
+    .from(T.pickPools)
+    .select("payload")
+    .eq("id", safeComboPoolId(boardDay))
+    .maybeSingle();
+  const safeCombo = (comboRow?.payload as SafeComboPayload | undefined) ?? null;
+  const safeCodes = rows.filter((r) => modeForSlot(r.slot) === "safe").map((r) => r.code);
+  if (!stale && safeCodes.length && (!safeCombo || safeCombo.signature !== safeComboSignature(safeCodes))) {
+    after(() => buildSafeCombo({ day, budgetMs: 100_000 }).then(() => undefined));
+  }
+
   const legs = rows.flatMap((r) => r.legs ?? []);
   const ticker: TickerItem[] = legs.slice(0, 24).map((l) => ({
     match: `${l.home} v ${l.away}`,
@@ -119,7 +135,9 @@ export default async function HomePage({
   const stats: { icon: IconName; label: string; value: string }[] = [
     { icon: "target", label: "Codes today", value: String(rows.length) },
     { icon: "layers", label: "Legs on board", value: String(legs.length) },
-    { icon: "shield", label: "Avg safe odds", value: avgSafe ? avgSafe.toFixed(2) : "—" },
+    safeCombo?.combo
+      ? { icon: "shield", label: "Safe combo odds", value: safeCombo.combo.totalOdds.toFixed(2) }
+      : { icon: "shield", label: "Avg safe odds", value: avgSafe ? avgSafe.toFixed(2) : "—" },
     { icon: "fire", label: "Top price", value: topOdds ? `${topOdds.toFixed(2)}×` : "—" },
   ];
 
@@ -171,6 +189,7 @@ export default async function HomePage({
           key={initialMode}
           day={boardDay}
           codes={rows}
+          safeCombo={safeCombo}
           initialMode={initialMode}
           fromUrl={Boolean(mode)}
         />

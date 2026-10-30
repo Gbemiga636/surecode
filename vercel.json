@@ -3,6 +3,8 @@
   "crons": [
     { "path": "/api/crawl", "schedule": "5 23 * * *" },
     { "path": "/api/crawl", "schedule": "0 19 * * *" },
+    { "path": "/api/cron/safe-combo", "schedule": "25 23 * * *" },
+    { "path": "/api/cron/safe-combo", "schedule": "20 19 * * *" },
     { "path": "/api/cron/audit", "schedule": "30 0 * * *" },
     { "path": "/api/cron/audit", "schedule": "30 1 * * *" },
     { "path": "/api/cron/audit", "schedule": "30 2 * * *" },
