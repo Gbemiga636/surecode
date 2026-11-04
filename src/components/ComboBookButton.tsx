@@ -23,7 +23,8 @@ export function ComboBookButton({ picks, origin }: { picks: AppPick[]; origin: s
       setMsg(json.error || "Failed");
       return;
     }
-    setMsg(json.code);
+    const left = Array.isArray(json.skipped) ? json.skipped.length : 0;
+    setMsg(left ? `${json.code} (${left} started left out)` : json.code);
     if (json.code) {
       try {
         await navigator.clipboard.writeText(json.code);

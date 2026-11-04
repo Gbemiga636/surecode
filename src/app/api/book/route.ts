@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     const booked = await bookPicks(picks.slice(0, 12));
     if (!booked.code) {
       return NextResponse.json(
-        { ok: false, error: booked.error || "Booking failed" },
+        { ok: false, error: booked.error || "Booking failed", skipped: booked.skipped },
         { status: 400 },
       );
     }
@@ -58,6 +58,7 @@ export async function POST(request: Request) {
       code: booked.code,
       url: booked.url,
       totalOdds: booked.totalOdds,
+      skipped: booked.skipped,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

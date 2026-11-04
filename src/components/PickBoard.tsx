@@ -82,7 +82,11 @@ export function PickBoard({
       setMsg(json.error || "Booking failed");
       return;
     }
-    setMsg(`Code ${json.code} ready — opening SportyBet`);
+    const left = Array.isArray(json.skipped) ? json.skipped.length : 0;
+    setMsg(
+      `Code ${json.code} ready — opening SportyBet` +
+        (left ? ` (${left} started game${left === 1 ? "" : "s"} left out)` : ""),
+    );
     if (json.code) {
       try {
         await navigator.clipboard.writeText(json.code);

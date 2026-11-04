@@ -257,13 +257,49 @@ export async function getAnalysisBoard(days = 2): Promise<
   return out.slice(0, 40);
 }
 
+/** Same window as Sure combine: a game this close to kickoff is not booked. */
+export const BOOKING_KICKOFF_BUFFER_MS = 2 * 60_000;
+
+export type SkippedPick = { match: string; reason: string };
+
+/**
+ * Drop games that have started (or have no kickoff). Customer codes are only
+ * created from the games still ahead of kickoff.
+ */
+export function splitBookablePicks(
+  picks: AppPick[],
+  now = Date.now(),
+): { open: AppPick[]; skipped: SkippedPick[] } {
+  const open: AppPick[] = [];
+  const skipped: SkippedPick[] = [];
+  for (const p of picks) {
+    const match = `${p.home ?? "?"} v ${p.away ?? "?"}`;
+    const kick = Date.parse(p.kickoff);
+    if (!Number.isFinite(kick) || kick <= 0) {
+      skipped.push({ match, reason: "no kickoff" });
+      continue;
+    }
+    if (kick - now < BOOKING_KICKOFF_BUFFER_MS) {
+      skipped.push({ match, reason: "already started" });
+      continue;
+    }
+    open.push(p);
+  }
+  return { open, skipped };
+}
+
 export async function bookPicks(
   picks: AppPick[],
-): Promise<{ code?: string; url?: string; totalOdds: number; legs: BookableLeg[]; error?: string }> {
+  now = Date.now(),
+): Promise<{ code?: string; url?: string; totalOdds: number; legs: BookableLeg[]; skipped: SkippedPick[]; error?: string }> {
+  const { open, skipped } = splitBookablePicks(picks, now);
   const legs: BookableLeg[] = [];
-  for (const p of picks) {
+  for (const p of open) {
     const meta = PICKS[p.pickCode];
-    if (!meta) continue;
+    if (!meta) {
+      skipped.push({ match: `${p.home} v ${p.away}`, reason: "unknown market" });
+      continue;
+    }
     legs.push({
       eventId: p.eventId,
       marketId: meta.marketId,
@@ -279,17 +315,27 @@ export async function bookPicks(
       implied: p.confidence,
     });
   }
-  if (legs.length < 1) return { error: "No bookable legs", totalOdds: 1, legs: [] };
+  if (legs.length < 1) {
+    return {
+      error: skipped.some((s) => s.reason === "already started")
+        ? "Those games have already started"
+        : "No bookable legs",
+      totalOdds: 1,
+      legs: [],
+      skipped,
+    };
+  }
   const totalOdds = legs.reduce((a, l) => a * l.odds, 1);
   const booked = await createBookingCode(legs);
   if (booked.error || !booked.code) {
-    return { error: booked.error || "Booking failed", totalOdds, legs };
+    return { error: booked.error || "Booking failed", totalOdds, legs, skipped };
   }
   return {
     code: booked.code,
     url: booked.url || sportyOpenUrl(booked.code),
     totalOdds,
     legs,
+    skipped,
   };
 }
 

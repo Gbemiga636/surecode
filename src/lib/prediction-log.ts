@@ -255,7 +255,8 @@ const CUSTOMER_SOURCES: ReadonlySet<LogSource> = new Set(["book", "builder", "su
 /**
  * A customer slip (book / builder / sure-combine) whose first leg had already
  * kicked off when it was logged. Those are never logged: they would be graded
- * on matches that had started or finished (booking itself is unaffected).
+ * on matches that had started or finished. /api/book also refuses to create
+ * the code; Sure combine, the builder and edit-code already drop started games.
  */
 export function lateCustomerSlip(slip: LogSlip, now = Date.now()): boolean {
   if (!slip || !CUSTOMER_SOURCES.has(slip.source) || slip.dataOrigin === "recovered") return false;

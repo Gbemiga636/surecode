@@ -1,8 +1,9 @@
 # Final test rules (pre-registered 2026-11-03)
 
 Written before the gate sample is complete. Nothing below may change after
-the first look at the gate result. Status: **draft until Avian signs off**
-(items marked *confirm*).
+the first look at the gate result. Written 2026-11-03. The commit check in
+section 6 was completed 2026-11-04. H3 stays draft (its 3% threshold is not
+part of this gate).
 
 ## 1. Question
 
@@ -19,7 +20,7 @@ that win more often than comparable selections it rejected?
 | Metric | `selection_lift_pp` for the Safe tier, Newcombe 95% interval (`lift_ci95_pp`) |
 | When to read | The first daily run where Safe-tier `unique_selected_n` ≥ **600** graded. One look only; no interim decisions. Expected ~Nov 30 to mid-December |
 | Pass | Lower bound of the 95% interval > 0 |
-| Fail | Interval includes 0 or is entirely below 0. The sample is **not** extended to chase significance (*confirm*) |
+| Fail | Interval includes 0 or is entirely below 0. The sample is not extended to chase significance |
 
 Sizing: at a ~80% hit rate with 3 controls, 600 selected picks give ~80%
 power to detect a +5 pp lift (two-sided 5%).
@@ -32,7 +33,7 @@ power to detect a +5 pp lift (two-sided 5%).
   overall or recent-window figures are not the Champion.
 - Tier and slip-size ROI (SE Safe, Boost, Longshot; 1, 2, 3+ legs).
 - H1 / H2 from `sc_hypotheses` (min n 800). H3 stays draft until its 3%
-  threshold is confirmed (*confirm*).
+  threshold is confirmed. It does not decide this gate.
 
 ## 4. Validity conditions (all must hold on the day of the read)
 
@@ -41,8 +42,11 @@ power to detect a +5 pp lift (two-sided 5%).
    `sure-engine.ts`, `learning.ts`, `crawl.ts`, `PICKS`, `SPORTY_SPORTS` or
    `settlePick`. Every commit in the window is listed with its row count.
 3. Recovered rows excluded; only rows predicted before kickoff.
-4. Customer slips created after kickoff are not logged (blocked since 53fc379)
-   and the older ones stay excluded.
+4. Customer slips are not created after kickoff. Sure combine, the builder and
+   edit-code already drop started games. `/api/book` drops them too (a code is
+   created only from legs still ahead of the 2-minute buffer). Logging still
+   refuses a customer slip whose first kickoff has passed (since 53fc379). The
+   one older late slip stays excluded.
 5. No rows left in `needs manual grading`: retirements/walkovers voided,
    stalled ITF matches graded from completed sets, the rest voided 7 days
    after kickoff.
@@ -56,3 +60,19 @@ fail.
 Change nothing that affects Champion picks, candidate logging or grading.
 New products (e.g. Safe combo, 4ed962b) may run but are reported separately
 and never pooled with the Champion.
+
+## 6. Commit check (53fc379 and 4ed962b)
+
+Checked 2026-11-04 against the frozen Champion files
+(`sure-engine.ts`, `learning.ts`, `crawl.ts`, `PICKS`, `SPORTY_SPORTS`,
+`settlePick`). Neither commit changes them, and neither changes
+`ENGINE_VERSION` or `CHAMPION_FINGERPRINT`.
+
+- `53fc379` (Evaluation v3) adds de-vig capture, refuses to *log* a customer
+  slip created after kickoff, and changes settlement only for matches SportyBet
+  never finished: retirements and walkovers are void, a stalled ITF score can
+  be read from completed set games, and a parked row is voided 7 days after
+  kickoff. Which picks are published is unchanged.
+- `4ed962b` (Safe combo) adds a separate published product. It is logged as
+  source `safe-combo` with tier `safe-combo`, which classifies as product
+  `user` and tier `none`. It is not part of the Sure-engine Safe gate.
