@@ -1,6 +1,6 @@
 /**
  * Brief v3 B2: SportyBet price shortly before kickoff for every published and
- * shadow selection. Called every 5 minutes (sql/schedule-v3.sql); each run
+ * shadow selection. Called every 5 minutes (pg_cron, end of sql/schema-eval-v3.sql); each run
  * prices selections kicking off within the next 10 minutes and overwrites the
  * previous capture, so the stored price is the last one seen 0–5 min before
  * kickoff. Audit only, never throws.

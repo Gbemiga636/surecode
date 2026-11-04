@@ -9,6 +9,7 @@
 -- C3  clv_sharp in the view
 -- D1  sc_hypotheses      frozen hypothesis registry (H1, H2 frozen here; H3 stays draft)
 -- D2  sc_shadow_selections  unpublished shadow log, graded by the audit cron
+-- Schedulers: pg_cron jobs for /api/cron/closing and /api/cron/sharp (run this after the app is deployed)
 --
 -- The app keeps working before this is run: it detects the missing columns /
 -- tables and skips v3 writes.
@@ -240,9 +241,60 @@ grant select on public.v_eval_selections, public.v_shadow_eval to service_role;
 grant all on public.sc_sharp_odds, public.sc_event_map, public.sc_line_probe, public.sc_hypotheses, public.sc_shadow_selections to service_role;
 grant usage, select on sequence public.sc_sharp_odds_id_seq, public.sc_line_probe_id_seq to service_role;
 
+-- ───────────────────────── schedulers (B2 closing, Phase 0 / C1 sharp) ─────────────────────────
+-- Vercel Hobby crons are daily only, so these run from Supabase. Nothing to set up by hand:
+-- the extensions are enabled here, and the cron token is generated inside the database
+-- (service role only), so no Vault secret and no extra Vercel env var.
+create extension if not exists pg_cron;
+create extension if not exists pg_net with schema extensions;
+
+create table if not exists public.sc_runtime_config (
+  id                 smallint primary key default 1 check (id = 1),
+  cron_token         text not null default replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
+  sharp_odds_api_key text,
+  updated_at         timestamptz not null default now()
+);
+insert into public.sc_runtime_config (id) values (1) on conflict (id) do nothing;
+alter table public.sc_runtime_config enable row level security;
+revoke all on public.sc_runtime_config from anon, authenticated;
+grant select on public.sc_runtime_config to service_role;
+
+-- Sharp prices need a pinnodds key. Either SHARP_ODDS_API_KEY in Vercel, or paste it here and run this line:
+--   update public.sc_runtime_config set sharp_odds_api_key = 'YOUR_KEY', updated_at = now() where id = 1;
+
+-- B2: SportyBet price ~5 minutes before kickoff for every published and shadow selection.
+select cron.schedule(
+  'surecode-closing',
+  '*/5 * * * *',
+  $$
+  select net.http_get(
+    url := 'https://surecodev1.vercel.app/api/cron/closing',
+    headers := jsonb_build_object('x-surecode-cron', (select cron_token from public.sc_runtime_config where id = 1)),
+    timeout_milliseconds := 60000
+  );
+  $$
+);
+
+-- Phase 0 / C1: sharp prices. Trial key (100 requests/day): hourly, 4 sports per run = 96/day.
+-- Paid plan: change the schedule to '*/5 * * * *'. Without a key the run exits immediately.
+select cron.schedule(
+  'surecode-sharp',
+  '7 * * * *',
+  $$
+  select net.http_get(
+    url := 'https://surecodev1.vercel.app/api/cron/sharp',
+    headers := jsonb_build_object('x-surecode-cron', (select cron_token from public.sc_runtime_config where id = 1)),
+    timeout_milliseconds := 60000
+  );
+  $$
+);
+
 notify pgrst, 'reload schema';
 
 -- ───────────────────────── acceptance checks ─────────────────────────
 -- select devig_method, count(*) from prediction_log where created_at > now() - interval '1 day' group by 1;   -- one method
 -- select id, status, frozen_at from sc_hypotheses order by id;                                               -- H1/H2 active+frozen, H3 draft
 -- select count(*) from v_eval_selections where clv_sporty is not null;
+-- select jobname, schedule, active from cron.job;                                                            -- surecode-closing, surecode-sharp
+-- select status_code, left(content, 200), created from net._http_response order by created desc limit 10;   -- 200s, not 401
+-- Remove:  select cron.unschedule('surecode-closing'); select cron.unschedule('surecode-sharp');

@@ -12,13 +12,17 @@ picks and sharp prices are never shown to users.
    `p_fair`, `devig_method`, `sporty_close`, the sharp / map / probe tables,
    the hypothesis registry (H1 and H2 frozen at run time, H3 draft), the shadow
    table, and recreates `v_eval_selections` with `clv_sporty` / `clv_sharp`.
+   It also enables `pg_cron` + `pg_net` and schedules the closing job (every
+   5 min) and the sharp job (hourly on the trial). The jobs authenticate with
+   a token generated inside the database (`sc_runtime_config`, service role
+   only), so there is no Vault secret or extra env var.
    Don't re-run `schema-eval-v1.sql` afterwards (its view is narrower).
-2. Vercel env: `SHARP_ODDS_API_KEY` = a pinnodds.com trial key (free, no card).
-   Optional: `SHARP_SPORTS` (default `football,tennis,basketball,hockey`),
-   `SHARP_CLOSE_WINDOW_MIN` (default 70; set 10 on a 5-minute schedule),
-   `SHARP_PROBE=0` to stop Phase 0 pairs after the test.
-3. Supabase: enable `pg_cron` + `pg_net`, store the cron secret in Vault and run
-   `sql/schedule-v3.sql` (closing job every 5 min; sharp job hourly on the trial).
+2. Sharp key: a pinnodds.com trial key (free, no card), either as Vercel env
+   `SHARP_ODDS_API_KEY` or with the one-line `update sc_runtime_config …` in
+   the SQL file. Optional env: `SHARP_SPORTS` (default
+   `football,tennis,basketball,hockey`), `SHARP_CLOSE_WINDOW_MIN` (default 70;
+   set 10 on a 5-minute schedule), `SHARP_PROBE=0` to stop Phase 0 pairs after
+   the test.
 
 Until step 1 runs the app keeps working and skips every v3 write
 (`auditSchema().evalV3`).

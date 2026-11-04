@@ -2,7 +2,8 @@
  * Brief v3 Phase 0 / C1 / C2: sharp (Pinnacle) prices next to SportyBet's.
  *
  * Provider: pinnodds.com (Pinnacle prematch board, one request per sport;
- * trial key = 100 requests/day). Configure with SHARP_ODDS_API_KEY (and
+ * trial key = 100 requests/day). Configure with SHARP_ODDS_API_KEY or
+ * sc_runtime_config.sharp_odds_api_key (and
  * optionally SHARP_ODDS_BASE_URL, SHARP_SPORTS, SHARP_PROBE,
  * SHARP_CLOSE_WINDOW_MIN). Sharp prices are internal only — check the
  * provider licence before showing any of them to users.
@@ -27,6 +28,7 @@ import {
   withTimeout,
 } from "./audit-db";
 import { P_FAIR_METHOD } from "./devig";
+import { runtimeConfig } from "./runtime-config";
 import { matchSharpEvent, matchesHypothesis, sharpFairForPick, type MatchableEvent, type SharpPeriod } from "./eval-v3";
 import { activeHypotheses } from "./shadow-log";
 
@@ -115,8 +117,8 @@ export async function runSharpCapture(budgetMs: number): Promise<SharpRunStats> 
   };
   const done = (reason?: string) => ({ ...stats, ok: !reason, ...(reason ? { reason } : {}), ms: Date.now() - started });
   try {
-    const key = (process.env.SHARP_ODDS_API_KEY || "").trim();
-    if (!key) return done("SHARP_ODDS_API_KEY is not set");
+    const key = (process.env.SHARP_ODDS_API_KEY || "").trim() || (await runtimeConfig())?.sharp_odds_api_key || "";
+    if (!key) return done("no sharp-odds key (SHARP_ODDS_API_KEY or sc_runtime_config.sharp_odds_api_key)");
     const sb = auditDb();
     if (!sb || auditDisabled()) return done("audit database unavailable");
     const schema = await auditSchema();
