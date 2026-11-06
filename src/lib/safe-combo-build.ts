@@ -1,8 +1,9 @@
 /**
  * Builds the day's Safe combo (see safe-combo.ts) after the crawl has booked
  * the engine's Safe slips. Reads only what the engine already produced —
- * its Safe slips and the Safe candidates it logged — re-prices every leg live,
- * books the codes and stores the result in sc_pick_pools. The engine and its
+ * its Safe slips and the short-price candidates it logged — re-prices every
+ * leg live, books the codes and stores the result in sc_pick_pools. Once a
+ * day's combo is ready it is frozen for that day. The engine and its
  * evaluation are untouched; combo legs are logged under their own source.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -14,11 +15,13 @@ import { logPredictions, type LogSlip } from "./prediction-log";
 import {
   SAFE_COMBO,
   bestPerEvent,
+  boardWindow,
   chooseSafeCombo,
   chooseSinglePicks,
   rankSurest,
   safeComboSignature,
   safeLegProblem,
+  surest,
   type SafeComboPayload,
   type SafeComboPick,
   type SafeLeg,
@@ -34,9 +37,11 @@ const HEADERS = {
 };
 /** A build stuck in "building" longer than this is treated as dead. */
 const BUILD_LOCK_MS = 4 * 60_000;
-/** An empty result for unchanged Safe codes is retried after this long. */
+/** An empty result is retried after this long (a ready combo is never rebuilt the same day). */
 const EMPTY_RETRY_MS = 90 * 60_000;
-const MAX_EVENTS = 40;
+const MAX_EVENTS = 80;
+/** Sharp prices older than this are ignored. */
+const SHARP_MAX_AGE_MS = 24 * 3_600_000;
 const SPORT_LABEL: Record<string, string> = {
   football: "Football",
   basketball: "Basketball",
@@ -70,6 +75,7 @@ type RawLeg = {
   sportLabel?: string;
   kickoff: number;
   engine: boolean;
+  odds?: number;
 };
 
 type LiveEvent = { book: MarketBook; home?: string; away?: string; kickoff?: number };
@@ -121,17 +127,24 @@ async function loadSafeSlips(sb: SupabaseClient, day: string) {
   return { safeCodes, legs: raw };
 }
 
-/** Every Safe candidate the engine logged that passed the leg filters, merged with its own slip legs. */
+/**
+ * Every Safe or Boost candidate the engine logged that passed the leg filters
+ * and starts inside the board-day window, merged with its own slip legs.
+ * Prices outside the Safe range are dropped later by safeLegProblem.
+ */
 async function loadSafeCandidates(sb: SupabaseClient, day: string, now: number, slipLegs: RawLeg[]): Promise<RawLeg[]> {
   const raw: RawLeg[] = [...slipLegs];
+  const w = boardWindow(day);
   const { data: cands, error } = await sb
     .from("prediction_candidates")
     .select("event_id, fixture, sport, league, kickoff, pick_code, odds, status, stage, rejection_reason")
     .in("day", [day, prevDay(day)])
-    .eq("product_tier", "safe")
+    .in("product_tier", ["safe", "boost"])
     .in("stage", ["pool", "slip"])
-    .gt("kickoff", new Date(now + SAFE_COMBO.kickoffBufferMs).toISOString())
-    .limit(2000);
+    .lte("odds", SAFE_COMBO.legMaxOdds + 0.1)
+    .gt("kickoff", new Date(Math.max(now + SAFE_COMBO.kickoffBufferMs, w.from)).toISOString())
+    .lt("kickoff", new Date(w.to).toISOString())
+    .limit(4000);
   if (error) console.warn("[safe-combo] candidates:", error.message);
   for (const c of cands ?? []) {
     if (!c.event_id || !c.pick_code || !PICKS[c.pick_code]) continue;
@@ -146,6 +159,7 @@ async function loadSafeCandidates(sb: SupabaseClient, day: string, now: number, 
       sport: c.sport ?? undefined,
       kickoff: Date.parse(String(c.kickoff)) || 0,
       engine: c.status === "selected",
+      odds: Number(c.odds) || undefined,
     });
   }
 
@@ -167,8 +181,12 @@ async function priceLive(raw: RawLeg[], budgetMs: number, now: number): Promise<
     if (l.kickoff && l.kickoff <= now + SAFE_COMBO.kickoffBufferMs) continue;
     byEvent.set(l.eventId, [...(byEvent.get(l.eventId) ?? []), l]);
   }
+  const shortest = (legs: RawLeg[]) => Math.min(...legs.map((l) => l.odds ?? 99));
   const events = [...byEvent.entries()]
-    .sort((a, b) => Number(b[1].some((l) => l.engine)) - Number(a[1].some((l) => l.engine)))
+    .sort(
+      (a, b) =>
+        Number(b[1].some((l) => l.engine)) - Number(a[1].some((l) => l.engine)) || shortest(a[1]) - shortest(b[1]),
+    )
     .slice(0, MAX_EVENTS);
   const out: SafeLeg[] = [];
   for (let i = 0; i < events.length; i += 8) {
@@ -214,9 +232,46 @@ async function priceLive(raw: RawLeg[], budgetMs: number, now: number): Promise<
   return out;
 }
 
+/**
+ * Latest sharp fair chance for each leg (internal only, never shown). Needs the
+ * v3 tables and a mapped event; legs without one keep pSharp unset.
+ */
+async function attachSharp(sb: SupabaseClient, legs: SafeLeg[], now: number): Promise<SafeLeg[]> {
+  if (!legs.length) return legs;
+  try {
+    const ids = [...new Set(legs.map((l) => l.eventId))];
+    const { data: maps, error } = await sb
+      .from("sc_event_map")
+      .select("sportybet_event_id, sharp_event_id")
+      .in("sportybet_event_id", ids);
+    if (error || !maps?.length) return legs;
+    const sharpOf = new Map(maps.map((m) => [String(m.sportybet_event_id), String(m.sharp_event_id)]));
+    const { data: odds, error: oddsErr } = await sb
+      .from("sc_sharp_odds")
+      .select("event_key, outcome, fair_prob, captured_at")
+      .in("event_key", [...new Set(sharpOf.values())])
+      .gte("captured_at", new Date(now - SHARP_MAX_AGE_MS).toISOString())
+      .order("captured_at", { ascending: false })
+      .limit(5000);
+    if (oddsErr || !odds?.length) return legs;
+    const latest = new Map<string, number>();
+    for (const o of odds) {
+      const k = `${o.event_key}|${o.outcome}`;
+      if (!latest.has(k)) latest.set(k, Number(o.fair_prob));
+    }
+    return legs.map((l) => {
+      const key = sharpOf.get(l.eventId);
+      const p = key ? latest.get(`${key}|${l.pickCode}`) : undefined;
+      return p != null && p > 0 && p < 1 ? { ...l, pSharp: p } : l;
+    });
+  } catch {
+    return legs;
+  }
+}
+
 const legLine = (l: SafeLeg, i: number) =>
   `${i + 1}. [${l.sportLabel || l.sport}] ${l.home} vs ${l.away}${l.league ? ` (${l.league})` : ""} — ` +
-  `${l.pickLabel} @ ${l.odds.toFixed(2)}, market fair chance ${Math.round(l.pFair * 100)}%, ` +
+  `${l.pickLabel} @ ${l.odds.toFixed(2)}, market fair chance ${Math.round(surest(l) * 100)}%, ` +
   `kickoff ${new Date(l.kickoff).toISOString().slice(0, 16)}Z`;
 
 /** AI pass over each leg: plays every match out and flags the ones it wouldn't trust. Null when AI is off or fails. */
@@ -280,7 +335,7 @@ const toPick = (l: SafeLeg, code: string | null, url: string | null): SafeComboP
   kickoff: l.kickoff,
   pickLabel: l.pickLabel,
   odds: Number(l.odds.toFixed(2)),
-  chance: Number(l.pFair.toFixed(4)),
+  chance: Number(surest(l).toFixed(4)),
   code,
   url,
   engine: l.engine,
@@ -330,8 +385,8 @@ export async function buildSafeCombo(opts: { day: string; force?: boolean; budge
     const age = (iso?: string) => now - (Date.parse(String(iso ?? "")) || 0);
     const existing = await readPayload(sb, opts.day);
     if (!opts.force && existing) {
-      if (existing.status === "ready" && existing.signature === signature) return { ok: true, skipped: "up to date", payload: existing };
-      if (existing.status === "empty" && existing.signature === signature && age(existing.builtAt) < EMPTY_RETRY_MS) {
+      if (existing.status === "ready") return { ok: true, skipped: "locked for the day", payload: existing };
+      if (existing.status === "empty" && age(existing.builtAt) < EMPTY_RETRY_MS) {
         return { ok: false, skipped: "nothing qualified recently", payload: existing };
       }
     }
@@ -344,8 +399,8 @@ export async function buildSafeCombo(opts: { day: string; force?: boolean; budge
     await sb.from(T.pickPools).upsert({ id: lockId, payload: { startedAt: new Date().toISOString() } });
 
     const raw = await loadSafeCandidates(sb, opts.day, now, slipLegs);
-    const priced = await priceLive(raw, Math.min(20_000, left() - 30_000), now);
-    let pool = rankSurest(bestPerEvent(priced.filter((l) => !safeLegProblem(l, now)))).slice(0, SAFE_COMBO.searchTop);
+    const priced = await attachSharp(sb, await priceLive(raw, Math.min(40_000, left() - 45_000), now), now);
+    let pool = rankSurest(bestPerEvent(priced.filter((l) => !safeLegProblem(l, now, opts.day)))).slice(0, SAFE_COMBO.searchTop);
 
     let ai = false;
     const screen = left() > 25_000 ? await aiScreenLegs(pool) : null;
@@ -358,13 +413,13 @@ export async function buildSafeCombo(opts: { day: string; force?: boolean; budge
 
     let combo: SafeComboPayload["combo"] = null;
     let available = pool;
-    for (let attempt = 0; attempt < 3 && left() > 12_000; attempt++) {
+    for (let attempt = 0; attempt < 5 && left() > 12_000; attempt++) {
       const choice = chooseSafeCombo(available);
       if (!choice) break;
       const play = left() > 20_000 ? await aiPlayOutCombo(choice.legs, choice.totalOdds) : null;
       if (play) ai = true;
-      if (play && (!play.pass || play.confidence < 0.55)) {
-        const weakest = choice.legs[(play.weakest ?? 0) - 1] ?? choice.legs.slice().sort((a, b) => a.pFair - b.pFair)[0];
+      if (play && (!play.pass || play.confidence < 0.6)) {
+        const weakest = choice.legs[(play.weakest ?? 0) - 1] ?? choice.legs.slice().sort((a, b) => surest(a) - surest(b))[0];
         available = available.filter((l) => l.eventId !== weakest.eventId);
         continue;
       }
@@ -380,8 +435,8 @@ export async function buildSafeCombo(opts: { day: string; force?: boolean; budge
         rationale:
           (play?.story ? `AI play-out (~${Math.round(play.confidence * 100)}%): ${play.story} ` : "") +
           (play?.risk ? `Biggest risk: ${play.risk} ` : "") +
-          `${choice.legs.length} of the day's surest Safe legs, chosen for the lowest bookmaker margin. ` +
-          `Market-estimated chance that all win: about ${pct}%. Not a guarantee — stake only what you can afford to lose.`,
+          `${choice.legs.length} of the day's surest legs, chosen for the highest chance at this price. ` +
+          `Estimated chance that all win: about ${pct}%. Not a guarantee — stake only what you can afford to lose.`,
       };
       break;
     }
@@ -409,8 +464,8 @@ export async function buildSafeCombo(opts: { day: string; force?: boolean; budge
       note: combo
         ? undefined
         : picks.length
-          ? "No combination of today's Safe legs reached 2.0 odds without weakening it, so only single picks are shown."
-          : "No Safe leg passed every check right now.",
+          ? "No combination of today's surest legs reached 2.0 odds without weakening it, so only single picks are shown."
+          : "No leg starting after 1 pm passed every check.",
     };
     await writePayload(sb, payload);
     await sb.from(T.pickPools).delete().eq("id", lockId);

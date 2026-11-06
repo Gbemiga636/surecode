@@ -10,7 +10,7 @@ import { Icon, type IconName } from "@/components/Icons";
 import type { SureModeChoice } from "@/components/SureModePicker";
 import { after } from "next/server";
 import { buildSafeCombo, safeComboPoolId } from "@/lib/safe-combo-build";
-import { safeComboSignature, type SafeComboPayload } from "@/lib/safe-combo";
+import type { SafeComboPayload } from "@/lib/safe-combo";
 
 export const dynamic = "force-dynamic";
 /** Room for a Safe combo build started after the response (see `after` below). */
@@ -114,7 +114,7 @@ export default async function HomePage({
     .maybeSingle();
   const safeCombo = (comboRow?.payload as SafeComboPayload | undefined) ?? null;
   const safeCodes = rows.filter((r) => modeForSlot(r.slot) === "safe").map((r) => r.code);
-  if (!stale && safeCodes.length && (!safeCombo || safeCombo.signature !== safeComboSignature(safeCodes))) {
+  if (!stale && safeCodes.length && safeCombo?.status !== "ready") {
     after(() => buildSafeCombo({ day, budgetMs: 100_000 }).then(() => undefined));
   }
 
@@ -180,8 +180,8 @@ export default async function HomePage({
             <Icon name="clock" size={18} />
             <p>
               <strong>Today’s board is being built.</strong> Showing the latest codes from {boardDay}; some
-              matches may already have started. Fresh codes land shortly after midnight and again in the
-              evening.
+              matches may already have started. Each day’s codes land shortly after midnight and stay the
+              same all day.
             </p>
           </div>
         )}

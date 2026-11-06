@@ -308,7 +308,7 @@ export function SureHomeClient({
           </div>
           <div className="relative z-[2] p-6 pr-[200px] max-[900px]:pr-6 sm:p-8 sm:pr-[220px]">
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
-              Today&apos;s Safe combo · one code
+              Today&apos;s Safe combo · one code · same all day
             </p>
             <p
               id="safe-combo-title"

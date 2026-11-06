@@ -8,6 +8,10 @@
  * unique legs): legs win at their de-vigged fair price, so the combined win
  * chance at fixed total odds is highest with the fewest, lowest-margin legs.
  * High-margin legs (≥9% overround), hockey and Draw No Bet lost the most.
+ *
+ * The board is built once per Lagos day and then frozen, so every leg starts
+ * inside the day window (13:00 Lagos → 06:00 next day): the codes stay
+ * bookable all morning and everyone gets the same codes.
  */
 import type { BookableLeg } from "./sporty";
 
@@ -21,35 +25,58 @@ export const SAFE_COMBO = {
   comboMaxOdds: 2.6,
   /** Used only when nothing fits the main band. */
   comboFallbackMaxOdds: 3.0,
-  comboSizes: [3, 4] as readonly number[],
-  comboFallbackSizes: [2, 5] as readonly number[],
+  comboSizes: [2, 3, 4] as readonly number[],
+  comboFallbackSizes: [5] as readonly number[],
   picksMin: 6,
   picksMax: 8,
   /** Combo search runs over this many of the surest legs. */
-  searchTop: 16,
+  searchTop: 20,
   kickoffBufferMs: 45 * 60_000,
+  /** Lagos hours (UTC+1, no DST): first kickoff on the board day, last kickoff the next morning. */
+  dayStartLagosHour: 13,
+  dayEndLagosHour: 6,
+  /** Drop a leg when the sharp market's fair chance is this much below SportyBet's. */
+  maxSharpShortfall: 0.03,
 } as const;
 
 export type SafeLeg = BookableLeg & {
   /** De-vigged fair probability at the current price. */
   pFair: number;
+  /** De-vigged sharp-market probability of the same outcome, when mapped. */
+  pSharp?: number | null;
   overround: number;
   /** Leg was in one of the engine's own Safe slips. */
   engine?: boolean;
   aiNote?: string | null;
 };
 
+/** The more cautious of the SportyBet and sharp fair chances. */
+export const surest = (l: SafeLeg) => (l.pSharp != null && l.pSharp > 0 && l.pSharp < 1 ? Math.min(l.pFair, l.pSharp) : l.pFair);
+
+/** Kickoff window [from, to) in ms for a Lagos board day. */
+export function boardWindow(day: string): { from: number; to: number } {
+  const from = Date.parse(`${day}T00:00:00Z`) + (SAFE_COMBO.dayStartLagosHour - 1) * 3_600_000;
+  const to = Date.parse(`${day}T00:00:00Z`) + (24 + SAFE_COMBO.dayEndLagosHour - 1) * 3_600_000;
+  return { from, to };
+}
+
 export type SafeComboChoice = { legs: SafeLeg[]; totalOdds: number; chance: number };
 
-/** Why a leg can't be used, or null when it can. */
-export function safeLegProblem(l: SafeLeg, now = Date.now()): string | null {
+/** Why a leg can't be used, or null when it can. `day` applies the board-day kickoff window. */
+export function safeLegProblem(l: SafeLeg, now = Date.now(), day?: string): string | null {
   if (!l?.eventId || !l.pickCode || !l.marketId || !l.outcomeId) return "not bookable";
   if (!(l.kickoff > now + SAFE_COMBO.kickoffBufferMs)) return "starts too soon";
+  if (day) {
+    const w = boardWindow(day);
+    if (l.kickoff < w.from) return "starts before 13:00";
+    if (l.kickoff >= w.to) return "not today";
+  }
   if (!(l.odds >= SAFE_COMBO.legMinOdds && l.odds <= SAFE_COMBO.legMaxOdds)) return "price outside Safe range";
   if (!(l.pFair > 0 && l.pFair < 1)) return "no fair price";
   if (!(l.overround < SAFE_COMBO.maxOverround)) return "bookmaker margin too high";
   if (SAFE_COMBO.excludeSports.includes(String(l.sport ?? ""))) return "sport excluded";
   if (SAFE_COMBO.excludePicks.includes(l.pickCode)) return "market excluded";
+  if (l.pSharp != null && l.pSharp > 0 && l.pFair - l.pSharp > SAFE_COMBO.maxSharpShortfall) return "sharp market disagrees";
   return null;
 }
 
@@ -61,7 +88,7 @@ export function bestPerEvent(legs: SafeLeg[]): SafeLeg[] {
   const best = new Map<string, SafeLeg>();
   for (const l of legs) {
     const cur = best.get(l.eventId);
-    if (!cur || valueOf(l) > valueOf(cur) + 1e-9 || (Math.abs(valueOf(l) - valueOf(cur)) <= 1e-9 && l.pFair > cur.pFair)) {
+    if (!cur || valueOf(l) > valueOf(cur) + 1e-9 || (Math.abs(valueOf(l) - valueOf(cur)) <= 1e-9 && surest(l) > surest(cur))) {
       best.set(l.eventId, l);
     }
   }
@@ -70,10 +97,10 @@ export function bestPerEvent(legs: SafeLeg[]): SafeLeg[] {
 
 /** Surest first; lower margin breaks ties. */
 export function rankSurest(legs: SafeLeg[]): SafeLeg[] {
-  return legs.slice().sort((a, b) => b.pFair - a.pFair || a.overround - b.overround || a.kickoff - b.kickoff);
+  return legs.slice().sort((a, b) => surest(b) - surest(a) || a.overround - b.overround || a.kickoff - b.kickoff);
 }
 
-export const comboChance = (legs: SafeLeg[]) => legs.reduce((a, l) => a * l.pFair, 1);
+export const comboChance = (legs: SafeLeg[]) => legs.reduce((a, l) => a * surest(l), 1);
 export const comboOdds = (legs: SafeLeg[]) => legs.reduce((a, l) => a * l.odds, 1);
 
 /**
@@ -129,7 +156,7 @@ export function chooseSinglePicks(legs: SafeLeg[], combo: SafeLeg[] = []): SafeL
   return rankSurest(out);
 }
 
-/** Changes whenever the engine's Safe codes for the day change. */
+/** The engine's Safe codes the combo was built from (kept for reference; the combo is frozen once ready). */
 export function safeComboSignature(safeCodes: (string | null | undefined)[]): string {
   return safeCodes.filter(Boolean).map(String).sort().join(",");
 }

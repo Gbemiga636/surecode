@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import {
   SAFE_COMBO,
   bestPerEvent,
+  boardWindow,
   chooseCombo,
   chooseSafeCombo,
   chooseSinglePicks,
   comboChance,
   safeComboSignature,
   safeLegProblem,
+  surest,
   type SafeLeg,
 } from "../src/lib/safe-combo";
 
@@ -91,6 +93,38 @@ test("chooseSinglePicks returns up to 8, surest first, always including the comb
   assert.equal(picks.length, SAFE_COMBO.picksMax);
   assert.ok(picks.some((p) => p.eventId === "10") && picks.some((p) => p.eventId === "11"));
   for (let i = 1; i < picks.length; i++) assert.ok(picks[i - 1].pFair >= picks[i].pFair);
+});
+
+test("boardWindow is 13:00 Lagos on the day to 06:00 Lagos the next morning", () => {
+  const w = boardWindow("2026-11-06");
+  assert.equal(new Date(w.from).toISOString(), "2026-11-06T12:00:00.000Z");
+  assert.equal(new Date(w.to).toISOString(), "2026-11-07T05:00:00.000Z");
+});
+
+test("safeLegProblem keeps the frozen board to games inside the day window", () => {
+  const day = "2026-10-30"; // NOW is 11:00 Lagos that day
+  assert.equal(safeLegProblem(leg("a", 1.2, 0.06, { kickoff: Date.parse("2026-10-30T11:30:00Z") }), NOW, day), "starts before 13:00");
+  assert.equal(safeLegProblem(leg("a", 1.2, 0.06, { kickoff: Date.parse("2026-10-30T12:00:00Z") }), NOW, day), null);
+  assert.equal(safeLegProblem(leg("a", 1.2, 0.06, { kickoff: Date.parse("2026-10-31T04:59:00Z") }), NOW, day), null);
+  assert.equal(safeLegProblem(leg("a", 1.2, 0.06, { kickoff: Date.parse("2026-10-31T05:00:00Z") }), NOW, day), "not today");
+});
+
+test("a sharp price well below SportyBet's fair chance drops the leg; a close one is used cautiously", () => {
+  const base = leg("a", 1.2);
+  assert.equal(safeLegProblem({ ...base, pSharp: base.pFair - 0.05 }, NOW), "sharp market disagrees");
+  const close = { ...base, pSharp: base.pFair - 0.02 };
+  assert.equal(safeLegProblem(close, NOW), null);
+  assert.equal(surest(close), close.pSharp);
+  assert.equal(surest({ ...base, pSharp: base.pFair + 0.05 }), base.pFair);
+  assert.equal(surest(base), base.pFair);
+});
+
+test("chooseSafeCombo can use two strong legs when they beat three at the same odds", () => {
+  const two = [leg("a", 1.42, 0.01), leg("b", 1.42, 0.01)];
+  const three = [leg("c", 1.27, 0.07), leg("d", 1.27, 0.07), leg("e", 1.27, 0.07)];
+  const c = chooseSafeCombo([...two, ...three]);
+  assert.ok(c);
+  assert.deepEqual(c!.legs.map((l) => l.eventId).sort(), ["a", "b"]);
 });
 
 test("safeComboSignature ignores order and blanks", () => {

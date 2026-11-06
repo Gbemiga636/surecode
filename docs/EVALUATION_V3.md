@@ -170,6 +170,20 @@ captured ≤ 15 min before kickoff; the target is 95%.
   Benjamini–Hochberg at 10% FDR, every cell labelled "hypothesis". On Oct 29,
   0 of 2,030 cells reach n = 400.
 
+## Operational change: one board per day (2026-11-06)
+
+At the owner's request every Lagos day now has one fixed set of codes.
+`/api/crawl` books the Sure board once (00:05 Lagos; 06:00 Lagos is a retry
+that only runs if the board is missing). Later calls only settle codes, and
+`?force=1` is manual only. The Safe combo is frozen once it is ready, and it
+only uses legs that start between 13:00 Lagos and 06:00 the next morning.
+
+The Champion's code and fingerprint are unchanged. It now runs once a day
+instead of twice (the 20:00 Lagos run is gone), so candidates and unique Safe
+selections build up more slowly. The 600-selection read in
+`FINAL_TEST_RULES.md` depends on n, not on a date, so it will come later than
+first estimated.
+
 ## Open decisions
 
 - H3 threshold (3%): needs Avian's confirmation before freezing.
