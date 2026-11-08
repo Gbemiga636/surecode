@@ -7,6 +7,7 @@ export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/prediction-log")) return NextResponse.next();
   if (request.nextUrl.pathname.startsWith("/api/cron/")) return NextResponse.next();
   if (request.nextUrl.pathname.startsWith("/api/mcp")) return NextResponse.next();
+  if (request.nextUrl.pathname.startsWith("/api/exbot/")) return NextResponse.next();
   return updateSession(request);
 }
 

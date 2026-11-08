@@ -1,0 +1,71 @@
+/* Everything is scoped under .exbot so SureCode's pages are untouched. */
+.exbot {
+  --x-bg: #0b0f14;
+  --x-panel: #121821;
+  --x-line: #1f2a37;
+  --x-text: #e6edf3;
+  --x-muted: #8b98a8;
+  --x-green: #2fbf71;
+  --x-red: #ef5350;
+  --x-amber: #f0b429;
+  --x-blue: #4c9aff;
+  min-height: 100vh;
+  background: var(--x-bg);
+  color: var(--x-text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.exbot * { box-sizing: border-box; }
+.exbot main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+.exbot h1 { font-size: 22px; font-weight: 700; margin: 0; }
+.exbot h2 { font-size: 13px; margin: 0 0 12px; color: var(--x-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.exbot p { margin: 0 0 10px; }
+.exbot a { color: var(--x-blue); }
+.exbot .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+.exbot .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.exbot .panel { background: var(--x-panel); border: 1px solid var(--x-line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.exbot .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.exbot .stat { background: #0e141c; border: 1px solid var(--x-line); border-radius: 8px; padding: 10px; }
+.exbot .stat b { display: block; font-size: 18px; }
+.exbot .stat span { color: var(--x-muted); font-size: 12px; }
+.exbot label { display: block; font-size: 12px; color: var(--x-muted); margin: 10px 0 4px; }
+.exbot label.check { display: flex; gap: 8px; align-items: flex-start; color: var(--x-text); font-size: 13px; }
+.exbot label.check input { width: auto; margin-top: 3px; }
+.exbot input, .exbot select { width: 100%; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--x-line); background: #0e141c; color: var(--x-text); font: inherit; }
+.exbot button { padding: 9px 14px; border-radius: 7px; border: 1px solid var(--x-line); background: #1b2633; color: var(--x-text); font: inherit; cursor: pointer; }
+.exbot button:disabled { opacity: .5; cursor: wait; }
+.exbot button.primary { background: var(--x-blue); border-color: var(--x-blue); color: #fff; }
+.exbot button.go { background: var(--x-green); border-color: var(--x-green); color: #04130a; font-weight: 600; }
+.exbot button.danger { background: transparent; border-color: var(--x-red); color: var(--x-red); }
+.exbot .choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.exbot .choice label { margin: 0; padding: 10px; border: 1px solid var(--x-line); border-radius: 8px; cursor: pointer; color: var(--x-text); background: #0e141c; }
+.exbot .choice label.on { border-color: var(--x-blue); box-shadow: 0 0 0 1px var(--x-blue) inset; }
+.exbot .choice label.on.real { border-color: var(--x-red); box-shadow: 0 0 0 1px var(--x-red) inset; }
+.exbot .choice input { display: none; }
+.exbot .choice b { display: block; font-size: 14px; }
+.exbot .choice span { font-size: 11.5px; color: var(--x-muted); }
+.exbot .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.exbot .muted { color: var(--x-muted); }
+.exbot .small { font-size: 12px; }
+.exbot .pos { color: var(--x-green); }
+.exbot .neg { color: var(--x-red); }
+.exbot .msg { margin-top: 10px; padding: 8px 10px; border-radius: 7px; font-size: 13px; }
+.exbot .msg.ok { background: #0f2a1c; color: #9be3bb; }
+.exbot .msg.bad { background: #2c1214; color: #f3a6a6; }
+.exbot .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; border: 1px solid var(--x-line); }
+.exbot .badge.live { border-color: var(--x-red); color: var(--x-red); }
+.exbot .badge.testnet { border-color: var(--x-amber); color: var(--x-amber); }
+.exbot .badge.paper { border-color: var(--x-blue); color: var(--x-blue); }
+.exbot .badge.on { border-color: var(--x-green); color: var(--x-green); }
+.exbot table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.exbot th, .exbot td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--x-line); white-space: nowrap; }
+.exbot th { color: var(--x-muted); font-weight: 500; }
+.exbot .scroll { overflow-x: auto; }
+.exbot .log { max-height: 320px; overflow-y: auto; font-size: 12.5px; }
+.exbot .log div { padding: 4px 0; border-bottom: 1px solid var(--x-line); }
+.exbot .lv-trade { color: var(--x-text); }
+.exbot .lv-warn { color: var(--x-amber); }
+.exbot .lv-error { color: var(--x-red); }
+.exbot .lv-info { color: var(--x-muted); }
+.exbot .warn { border-left: 3px solid var(--x-amber); padding: 10px 12px; background: #1d1a10; border-radius: 6px; font-size: 13px; }
+.exbot hr { border: 0; border-top: 1px solid var(--x-line); margin: 16px 0; }
+.exbot .login { max-width: 380px; margin: 0 auto; padding-top: 12vh; }
