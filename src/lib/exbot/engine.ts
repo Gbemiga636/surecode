@@ -10,29 +10,17 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Exchange } from "ccxt";
-import { BARS, COSTS, MIN_BARS, RISK, STRATEGY, SYMBOLS, TIMEFRAME_MS, type ExchangeId, type Mode } from "./config";
+import { lockAccount, releaseAccount, type Account } from "./account";
+import { BARS, COSTS, MIN_BARS, RISK, STRATEGY, SYMBOLS, TIMEFRAME_MS, type CryptoExchangeId as ExchangeId, type Mode } from "./config";
 import { decrypt } from "./crypto";
 import { logEvent, type Level } from "./events";
 import { closedCandles, LiveBroker, loadMarkets, makeExchange, short } from "./exchange";
 import { NewsGuard } from "./news";
+import { OptionsSession } from "./options-engine";
 import { fill, isClosed, rMultiple, riskUsd, simulateStop, type Position } from "./position";
 import { RiskManager, type RiskState } from "./risk";
 import { emaTrend, type Bar } from "./strategy";
 
-export type Account = {
-  user_id: string;
-  email: string;
-  exchange: ExchangeId;
-  mode: Mode;
-  enabled: boolean;
-  key_enc: string | null;
-  secret_enc: string | null;
-  key_check: string | null;
-  live_confirmed_at: string | null;
-  paper_start: number;
-};
-
-const ACCOUNT_COLS = "user_id,email,exchange,mode,enabled,key_enc,secret_enc,key_check,live_confirmed_at,paper_start";
 const SIDE = { 1: "LONG", [-1]: "SHORT" } as const;
 const STALE_MS = 30 * 60_000;
 const fmt = (x: number, d = 2) => x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -90,16 +78,13 @@ export class Session {
 
   /** Locks the member (null if another tick holds the lock) and loads positions and state. */
   static async open(sb: SupabaseClient, userId: string, now = new Date()): Promise<Session | null> {
-    const until = new Date(now.getTime() + 55_000).toISOString();
-    const { data, error } = await sb
-      .from("exbot_accounts")
-      .update({ lock_until: until })
-      .eq("user_id", userId)
-      .or(`lock_until.is.null,lock_until.lt."${now.toISOString()}"`)
-      .select(ACCOUNT_COLS);
-    if (error) throw new Error(`lock: ${error.message}`);
-    if (!data?.length) return null;
-    const s = new Session(sb, data[0] as unknown as Account, now);
+    const a = await lockAccount(sb, userId, now);
+    if (!a) return null;
+    return Session.fromLocked(sb, a, now);
+  }
+
+  static async fromLocked(sb: SupabaseClient, a: Account, now: Date): Promise<Session> {
+    const s = new Session(sb, a, now);
     try {
       await s.load();
     } catch (e) {
@@ -120,9 +105,10 @@ export class Session {
     this.lastBar = (st?.last_bar as Record<string, number>) || {};
     this.paperCash = st?.paper_cash != null ? Number(st.paper_cash) : Number(a.paper_start);
     if (a.mode !== "paper" && a.key_enc && a.secret_enc) {
-      const ex = makeExchange(a.exchange, a.mode, { apiKey: decrypt(a.key_enc), secret: decrypt(a.secret_enc) });
-      await loadMarkets(ex, a.exchange, a.mode);
-      this.broker = new LiveBroker(ex, a.exchange, a.mode);
+      const id = a.exchange as ExchangeId;
+      const ex = makeExchange(id, a.mode, { apiKey: decrypt(a.key_enc), secret: decrypt(a.secret_enc) });
+      await loadMarkets(ex, id, a.mode);
+      this.broker = new LiveBroker(ex, id, a.mode);
     }
     this.equity = this.broker ? await this.broker.equity() : this.paperCash;
     this.risk = new RiskManager(RISK, this.equity, st?.risk as Partial<RiskState> | null);
@@ -196,7 +182,7 @@ export class Session {
     const { a, now } = this;
     let p = this.positions.get(symbol);
     if (!p && block) return;
-    const bars = await ctx.candlesFor(a.exchange, a.mode, symbol);
+    const bars = await ctx.candlesFor(a.exchange as ExchangeId, a.mode, symbol);
     if (bars.length < MIN_BARS) return;
     const last = bars.length - 1;
     const prevT = this.lastBar[symbol];
@@ -276,7 +262,7 @@ export class Session {
     let n = 0;
     for (const p of [...this.positions.values()]) {
       try {
-        const price = await ctx.lastPrice(this.a.exchange, this.a.mode, p.symbol);
+        const price = await ctx.lastPrice(this.a.exchange as ExchangeId, this.a.mode, p.symbol);
         if (this.broker) await this.broker.close(p, price, why, this.now);
         else fill(p, price * (1 - p.side * COSTS.slippage), p.qtyOpen, COSTS.takerFee, this.now.toISOString(), why);
         await this.finish(p);
@@ -299,11 +285,18 @@ export class Session {
     await this.release(status);
   }
 
-  async release(status?: string): Promise<void> {
-    const patch: Record<string, unknown> = { lock_until: null };
-    if (status) Object.assign(patch, { status, status_at: new Date().toISOString() });
-    await this.sb.from("exbot_accounts").update(patch).eq("user_id", this.a.user_id);
+  release(status?: string): Promise<void> {
+    return releaseAccount(this.sb, this.a.user_id, status);
   }
+}
+
+export type AnySession = Session | OptionsSession;
+
+/** Locks the member and loads the crypto or the Alpaca options session (null if busy). */
+export async function openSession(sb: SupabaseClient, userId: string, now = new Date()): Promise<AnySession | null> {
+  const a = await lockAccount(sb, userId, now);
+  if (!a) return null;
+  return a.exchange === "alpaca" ? OptionsSession.fromLocked(sb, a, now) : Session.fromLocked(sb, a, now);
 }
 
 /** One tick for every member (or one member when `onlyUser` is set). */
@@ -323,9 +316,9 @@ export async function runTick(sb: SupabaseClient, onlyUser?: string): Promise<Re
   await Promise.all(
     todo.map(async (row) => {
       const who = String(row.email).split("@")[0];
-      let s: Session | null = null;
+      let s: AnySession | null = null;
       try {
-        s = await Session.open(sb, row.user_id);
+        s = await openSession(sb, row.user_id);
         if (!s) {
           out[who] = "busy (previous tick still running)";
           return;

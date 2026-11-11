@@ -9,8 +9,14 @@ export default async function ExbotLogin() {
   return (
     <main className="login">
       <div className="panel">
-        <h1>exbot</h1>
-        <p className="muted small">Automated crypto trading. Sign in, or create an account with any email.</p>
+        <div className="brand">
+          <div className="logo">ex</div>
+          <div>
+            <h1>exbot</h1>
+            <small>Crypto trends · US options</small>
+          </div>
+        </div>
+        <p className="muted small">Automated trading on Bybit, Binance and Alpaca, with paper trading first. Sign in, or create an account with any email.</p>
         <LoginForm />
       </div>
     </main>

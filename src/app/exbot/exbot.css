@@ -1,71 +1,157 @@
 /* Everything is scoped under .exbot so SureCode's pages are untouched. */
 .exbot {
-  --x-bg: #0b0f14;
-  --x-panel: #121821;
-  --x-line: #1f2a37;
-  --x-text: #e6edf3;
-  --x-muted: #8b98a8;
-  --x-green: #2fbf71;
-  --x-red: #ef5350;
-  --x-amber: #f0b429;
-  --x-blue: #4c9aff;
+  --x-bg: #070a10;
+  --x-panel: rgba(18, 24, 36, .72);
+  --x-panel-solid: #111827;
+  --x-line: rgba(148, 163, 184, .14);
+  --x-line-strong: rgba(148, 163, 184, .28);
+  --x-text: #e8eef6;
+  --x-muted: #8a96a8;
+  --x-green: #22c55e;
+  --x-red: #f43f5e;
+  --x-amber: #f59e0b;
+  --x-blue: #3b82f6;
+  --x-violet: #8b5cf6;
+  --x-cyan: #06b6d4;
+  --x-grad: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 55%, #06b6d4 100%);
   min-height: 100vh;
-  background: var(--x-bg);
   color: var(--x-text);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 14px/1.55 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(900px 500px at 10% -10%, rgba(59, 130, 246, .18), transparent 60%),
+    radial-gradient(800px 500px at 100% 0%, rgba(139, 92, 246, .14), transparent 60%),
+    radial-gradient(700px 400px at 50% 110%, rgba(6, 182, 212, .08), transparent 60%),
+    var(--x-bg);
+  background-attachment: fixed;
 }
 .exbot * { box-sizing: border-box; }
-.exbot main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
-.exbot h1 { font-size: 22px; font-weight: 700; margin: 0; }
-.exbot h2 { font-size: 13px; margin: 0 0 12px; color: var(--x-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.exbot main { max-width: 1180px; margin: 0 auto; padding: 22px 18px 72px; }
+.exbot h1 { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -.02em; }
+.exbot h2 { font-size: 12px; margin: 0 0 14px; color: var(--x-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; display: flex; align-items: center; gap: 8px; }
+.exbot h3 { font-size: 15px; margin: 0 0 6px; font-weight: 700; }
 .exbot p { margin: 0 0 10px; }
-.exbot a { color: var(--x-blue); }
-.exbot .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
-.exbot .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-.exbot .panel { background: var(--x-panel); border: 1px solid var(--x-line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-.exbot .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 10px; }
-.exbot .stat { background: #0e141c; border: 1px solid var(--x-line); border-radius: 8px; padding: 10px; }
-.exbot .stat b { display: block; font-size: 18px; }
-.exbot .stat span { color: var(--x-muted); font-size: 12px; }
-.exbot label { display: block; font-size: 12px; color: var(--x-muted); margin: 10px 0 4px; }
-.exbot label.check { display: flex; gap: 8px; align-items: flex-start; color: var(--x-text); font-size: 13px; }
-.exbot label.check input { width: auto; margin-top: 3px; }
-.exbot input, .exbot select { width: 100%; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--x-line); background: #0e141c; color: var(--x-text); font: inherit; }
-.exbot button { padding: 9px 14px; border-radius: 7px; border: 1px solid var(--x-line); background: #1b2633; color: var(--x-text); font: inherit; cursor: pointer; }
-.exbot button:disabled { opacity: .5; cursor: wait; }
-.exbot button.primary { background: var(--x-blue); border-color: var(--x-blue); color: #fff; }
-.exbot button.go { background: var(--x-green); border-color: var(--x-green); color: #04130a; font-weight: 600; }
-.exbot button.danger { background: transparent; border-color: var(--x-red); color: var(--x-red); }
-.exbot .choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.exbot .choice label { margin: 0; padding: 10px; border: 1px solid var(--x-line); border-radius: 8px; cursor: pointer; color: var(--x-text); background: #0e141c; }
-.exbot .choice label.on { border-color: var(--x-blue); box-shadow: 0 0 0 1px var(--x-blue) inset; }
-.exbot .choice label.on.real { border-color: var(--x-red); box-shadow: 0 0 0 1px var(--x-red) inset; }
-.exbot .choice input { display: none; }
-.exbot .choice b { display: block; font-size: 14px; }
-.exbot .choice span { font-size: 11.5px; color: var(--x-muted); }
-.exbot .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.exbot a { color: #93c5fd; }
 .exbot .muted { color: var(--x-muted); }
-.exbot .small { font-size: 12px; }
+.exbot .small { font-size: 12.5px; }
 .exbot .pos { color: var(--x-green); }
 .exbot .neg { color: var(--x-red); }
-.exbot .msg { margin-top: 10px; padding: 8px 10px; border-radius: 7px; font-size: 13px; }
-.exbot .msg.ok { background: #0f2a1c; color: #9be3bb; }
-.exbot .msg.bad { background: #2c1214; color: #f3a6a6; }
-.exbot .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; border: 1px solid var(--x-line); }
-.exbot .badge.live { border-color: var(--x-red); color: var(--x-red); }
-.exbot .badge.testnet { border-color: var(--x-amber); color: var(--x-amber); }
-.exbot .badge.paper { border-color: var(--x-blue); color: var(--x-blue); }
-.exbot .badge.on { border-color: var(--x-green); color: var(--x-green); }
+.exbot .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.exbot hr { border: 0; border-top: 1px solid var(--x-line); margin: 18px 0; }
+
+/* header */
+.exbot .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+.exbot .brand { display: flex; align-items: center; gap: 12px; }
+.exbot .logo { width: 38px; height: 38px; border-radius: 11px; background: var(--x-grad); display: grid; place-items: center; font-weight: 900; color: #fff; box-shadow: 0 8px 24px rgba(99, 102, 241, .35); }
+.exbot .brand small { display: block; color: var(--x-muted); font-size: 12px; margin-top: 1px; }
+.exbot .user { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--x-muted); }
+
+/* cards */
+.exbot .panel {
+  background: var(--x-panel);
+  border: 1px solid var(--x-line);
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 18px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 12px 32px rgba(0, 0, 0, .25);
+}
+.exbot .grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+.exbot .grid > .panel { margin-bottom: 0; }
+.exbot .grid + .panel, .exbot .grid + .grid { margin-top: 18px; }
+@media (max-width: 860px) { .exbot .grid { grid-template-columns: 1fr; } }
+
+/* hero */
+.exbot .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 18px; align-items: stretch; }
+@media (max-width: 860px) { .exbot .hero { grid-template-columns: 1fr; } }
+.exbot .balance span { color: var(--x-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.exbot .balance b { display: block; font-size: 34px; font-weight: 800; letter-spacing: -.03em; margin: 4px 0 2px; }
+.exbot .balance .delta { font-size: 13px; font-weight: 600; }
+.exbot .spark { width: 100%; height: 120px; display: block; }
+.exbot .spark-empty { height: 120px; display: grid; place-items: center; color: var(--x-muted); font-size: 12.5px; border: 1px dashed var(--x-line-strong); border-radius: 12px; }
+.exbot .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 16px; }
+.exbot .stat { background: rgba(255, 255, 255, .025); border: 1px solid var(--x-line); border-radius: 12px; padding: 12px; }
+.exbot .stat b { display: block; font-size: 18px; font-weight: 700; margin-top: 2px; }
+.exbot .stat span { color: var(--x-muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.exbot .statusline { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--x-muted); }
+.exbot .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--x-muted); display: inline-block; }
+.exbot .dot.on { background: var(--x-green); box-shadow: 0 0 0 4px rgba(34, 197, 94, .15); animation: x-pulse 2s infinite; }
+@keyframes x-pulse { 50% { box-shadow: 0 0 0 7px rgba(34, 197, 94, .05); } }
+
+/* forms */
+.exbot label { display: block; font-size: 12px; color: var(--x-muted); margin: 12px 0 5px; font-weight: 600; }
+.exbot label.check { display: flex; gap: 10px; align-items: flex-start; color: var(--x-text); font-size: 13px; font-weight: 400; padding: 10px 12px; border: 1px solid rgba(244, 63, 94, .35); border-radius: 10px; background: rgba(244, 63, 94, .06); }
+.exbot label.check input { width: auto; margin-top: 3px; accent-color: var(--x-red); }
+.exbot input, .exbot select {
+  width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--x-line-strong);
+  background: rgba(2, 6, 14, .6); color: var(--x-text); font: inherit; transition: border-color .15s, box-shadow .15s;
+}
+.exbot input:focus, .exbot select:focus { outline: none; border-color: var(--x-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, .2); }
+.exbot button {
+  padding: 9px 15px; border-radius: 10px; border: 1px solid var(--x-line-strong); background: rgba(255, 255, 255, .04);
+  color: var(--x-text); font: inherit; font-weight: 600; cursor: pointer; transition: transform .08s, background .15s, border-color .15s, box-shadow .15s;
+}
+.exbot button:hover:not(:disabled) { background: rgba(255, 255, 255, .08); border-color: rgba(148, 163, 184, .45); }
+.exbot button:active:not(:disabled) { transform: translateY(1px); }
+.exbot button:disabled { opacity: .5; cursor: not-allowed; }
+.exbot button.primary { background: var(--x-grad); border-color: transparent; color: #fff; box-shadow: 0 8px 20px rgba(99, 102, 241, .3); }
+.exbot button.go { background: linear-gradient(135deg, #22c55e, #10b981); border-color: transparent; color: #03140a; box-shadow: 0 8px 20px rgba(34, 197, 94, .28); }
+.exbot button.danger { background: transparent; border-color: rgba(244, 63, 94, .6); color: #fda4af; }
+.exbot button.danger:hover:not(:disabled) { background: rgba(244, 63, 94, .1); }
+.exbot button.ghost { background: transparent; border-color: transparent; color: var(--x-muted); padding: 6px 10px; }
+
+/* choice cards (exchange and mode) */
+.exbot .choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.exbot .choice label {
+  margin: 0; padding: 12px; border: 1px solid var(--x-line-strong); border-radius: 12px; cursor: pointer; color: var(--x-text);
+  background: rgba(255, 255, 255, .02); font-weight: 400; transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.exbot .choice label:hover { border-color: rgba(148, 163, 184, .5); }
+.exbot .choice label.on { border-color: var(--x-blue); background: rgba(59, 130, 246, .08); box-shadow: 0 0 0 1px var(--x-blue) inset; }
+.exbot .choice label.on.real { border-color: var(--x-red); background: rgba(244, 63, 94, .08); box-shadow: 0 0 0 1px var(--x-red) inset; }
+.exbot .choice input { display: none; }
+.exbot .choice b { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.exbot .choice span { font-size: 11.5px; color: var(--x-muted); display: block; margin-top: 3px; }
+.exbot .tag { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px; background: rgba(139, 92, 246, .18); color: #c4b5fd; text-transform: uppercase; letter-spacing: .05em; }
+
+/* messages and badges */
+.exbot .msg { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+.exbot .msg.ok { background: rgba(34, 197, 94, .1); color: #86efac; border: 1px solid rgba(34, 197, 94, .25); }
+.exbot .msg.bad { background: rgba(244, 63, 94, .1); color: #fda4af; border: 1px solid rgba(244, 63, 94, .25); }
+.exbot .badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; font-size: 11.5px; font-weight: 700; border: 1px solid var(--x-line-strong); letter-spacing: .02em; }
+.exbot .badge.live { border-color: rgba(244, 63, 94, .6); color: #fda4af; background: rgba(244, 63, 94, .08); }
+.exbot .badge.testnet { border-color: rgba(245, 158, 11, .6); color: #fcd34d; background: rgba(245, 158, 11, .08); }
+.exbot .badge.paper { border-color: rgba(59, 130, 246, .6); color: #93c5fd; background: rgba(59, 130, 246, .08); }
+.exbot .badge.on { border-color: rgba(34, 197, 94, .6); color: #86efac; background: rgba(34, 197, 94, .08); }
+.exbot .warn { border: 1px solid rgba(245, 158, 11, .35); border-left: 3px solid var(--x-amber); padding: 12px 14px; background: rgba(245, 158, 11, .07); border-radius: 12px; font-size: 13px; }
+.exbot .note { border: 1px solid rgba(59, 130, 246, .3); padding: 12px 14px; background: rgba(59, 130, 246, .06); border-radius: 12px; font-size: 13px; }
+
+/* plan / facts list */
+.exbot .facts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.exbot .facts li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 12px; border-radius: 10px; background: rgba(255, 255, 255, .025); border: 1px solid var(--x-line); font-size: 13px; }
+.exbot .facts li span { color: var(--x-muted); }
+.exbot .facts li b { text-align: right; }
+.exbot .steps { margin: 0; padding-left: 18px; font-size: 13px; }
+.exbot .steps li { margin-bottom: 6px; }
+
+/* tables */
 .exbot table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.exbot th, .exbot td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--x-line); white-space: nowrap; }
-.exbot th { color: var(--x-muted); font-weight: 500; }
+.exbot th, .exbot td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--x-line); white-space: nowrap; }
+.exbot th { color: var(--x-muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
+.exbot tbody tr:hover { background: rgba(255, 255, 255, .025); }
 .exbot .scroll { overflow-x: auto; }
-.exbot .log { max-height: 320px; overflow-y: auto; font-size: 12.5px; }
-.exbot .log div { padding: 4px 0; border-bottom: 1px solid var(--x-line); }
+.exbot .empty { padding: 18px; text-align: center; color: var(--x-muted); font-size: 13px; border: 1px dashed var(--x-line-strong); border-radius: 12px; }
+
+/* activity */
+.exbot .log { max-height: 360px; overflow-y: auto; font-size: 12.5px; display: grid; gap: 2px; }
+.exbot .log div { padding: 7px 10px; border-radius: 8px; display: grid; grid-template-columns: 128px 1fr; gap: 10px; }
+.exbot .log div:hover { background: rgba(255, 255, 255, .03); }
 .exbot .lv-trade { color: var(--x-text); }
-.exbot .lv-warn { color: var(--x-amber); }
-.exbot .lv-error { color: var(--x-red); }
+.exbot .lv-trade::before { content: ""; }
+.exbot .lv-warn { color: #fcd34d; }
+.exbot .lv-error { color: #fda4af; }
 .exbot .lv-info { color: var(--x-muted); }
-.exbot .warn { border-left: 3px solid var(--x-amber); padding: 10px 12px; background: #1d1a10; border-radius: 6px; font-size: 13px; }
-.exbot hr { border: 0; border-top: 1px solid var(--x-line); margin: 16px 0; }
-.exbot .login { max-width: 380px; margin: 0 auto; padding-top: 12vh; }
+
+/* login */
+.exbot .login { max-width: 420px; margin: 0 auto; padding-top: 12vh; }
+.exbot .login .panel { padding: 26px; }
+.exbot .login .brand { margin-bottom: 14px; }

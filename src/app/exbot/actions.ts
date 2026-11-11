@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { Alpaca, AlpacaError } from "@/lib/exbot/alpaca";
 import { EXCHANGES, MODES, RISK, type ExchangeId, type Mode } from "@/lib/exbot/config";
 import { decrypt, encrypt, hint } from "@/lib/exbot/crypto";
-import { runTick, Session, TickContext } from "@/lib/exbot/engine";
+import { openSession, runTick, TickContext } from "@/lib/exbot/engine";
 import { logEvent } from "@/lib/exbot/events";
 import { LiveBroker, loadMarkets, makeExchange, short } from "@/lib/exbot/exchange";
+import { serverRegion } from "@/lib/exbot/reach";
 import { RiskManager } from "@/lib/exbot/risk";
 import { requireViewer } from "@/lib/exbot/viewer";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -51,7 +53,28 @@ async function openPositions(userId: string, mode: string): Promise<number> {
   return count || 0;
 }
 
+async function verifyAlpaca(mode: Mode, apiKey: string, secret: string): Promise<{ check: string; detail: string }> {
+  const which = mode === "live" ? "live (real money)" : "paper";
+  try {
+    const acct = await new Alpaca(apiKey, secret, mode === "live").account();
+    const level = Number(acct.options_trading_level ?? acct.options_approved_level ?? 0);
+    const problems: string[] = [];
+    if (acct.status !== "ACTIVE") problems.push(`Alpaca account status is ${acct.status} (it must be ACTIVE)`);
+    if (acct.trading_blocked || acct.account_blocked) problems.push("Alpaca has blocked trading on this account");
+    if (level < 3) problems.push(`options level is ${level}; iron condors need level 3 (apply in the Alpaca dashboard under Options trading)`);
+    if (problems.length) return { check: problems.join("; "), detail: problems.join("; ") };
+    return { check: "ok", detail: `Connected to your Alpaca ${which} account. Equity: $${Number(acct.equity).toFixed(2)}, options level ${level}.` };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    const msg = e instanceof AlpacaError && (e.status === 401 || e.status === 403)
+      ? `Alpaca rejected the key: make sure it is a ${which} key (paper keys come from the Paper account in the Alpaca dashboard) and that you copied both the key and the secret. (${m})`
+      : m;
+    return { check: msg, detail: msg };
+  }
+}
+
 async function verifyKey(exchange: ExchangeId, mode: Mode, apiKey: string, secret: string): Promise<{ check: string; detail: string }> {
+  if (exchange === "alpaca") return verifyAlpaca(mode, apiKey, secret);
   try {
     const ex = makeExchange(exchange, mode, { apiKey, secret });
     await loadMarkets(ex, exchange, mode);
@@ -60,8 +83,12 @@ async function verifyKey(exchange: ExchangeId, mode: Mode, apiKey: string, secre
     return { check: "ok", detail: `Connected. Futures balance: ${(equity ?? 0).toFixed(2)} USDT.` };
   } catch (e) {
     const m = short(e);
-    const geo = /403|451|restricted|CloudFront|not available in your region/i.test(m);
-    const msg = geo ? `The exchange refused the server's location (${m}).` : m;
+    const geo = /\b451\b|CloudFront|block access from your country|restricted location|not available in your region/i.test(m);
+    const msg = geo
+      ? `${exchange === "bybit" ? "Bybit" : "Binance"} blocked our server's location (region ${serverRegion()}), not you. Tell the admin; meanwhile Practice mode still works. (${m})`
+      : /Invalid|API-key|api key|signature|10003|10004|-2014|-2015/i.test(m)
+        ? `The exchange rejected the key: check you copied the full key and secret, that it is a ${mode === "testnet" ? "testnet" : "mainnet (real)"} key, and that it has Contract/Futures trading permission. (${m})`
+        : m;
     return { check: msg, detail: msg };
   }
 }
@@ -74,6 +101,7 @@ export async function saveSettings(_: Result, form: FormData): Promise<Result> {
   const apiKey = String(form.get("apiKey") || "").trim();
   const secret = String(form.get("secret") || "").trim();
   if (!EXCHANGES.includes(exchange) || !MODES.includes(mode)) return done(false, "Choose an exchange and a mode.");
+  if (exchange === "alpaca" && mode === "paper") return done(false, "For Alpaca, choose Paper trading (your free Alpaca paper account) or Real money.");
 
   const { data: cur } = await sb.from("exbot_accounts").select("exchange,mode,key_enc,secret_enc").eq("user_id", v.userId).maybeSingle();
   if (cur && (cur.exchange !== exchange || cur.mode !== mode) && (await openPositions(v.userId, cur.mode)) > 0) {
@@ -131,14 +159,17 @@ export async function testConnection(): Promise<Result> {
 export async function setEnabled(on: boolean): Promise<Result> {
   const v = await requireViewer();
   const sb = createAdminClient();
-  const { data: a } = await sb.from("exbot_accounts").select("mode,key_check,live_confirmed_at").eq("user_id", v.userId).maybeSingle();
+  const { data: a } = await sb.from("exbot_accounts").select("exchange,mode,key_check,live_confirmed_at").eq("user_id", v.userId).maybeSingle();
   if (!a) return done(false, "Save your settings first.");
   if (on && a.mode !== "paper" && a.key_check !== "ok") return done(false, "Test the exchange connection first.");
   if (on && a.mode === "live" && !a.live_confirmed_at) return done(false, "Confirm real-money trading in the settings first.");
   await sb.from("exbot_accounts").update({ enabled: on, updated_at: new Date().toISOString() }).eq("user_id", v.userId);
   await logEvent(sb, v.userId, "info", on ? `bot started (${a.mode})` : "bot paused: no new trades; open positions keep their stops and exits");
   if (on) await runTick(sb, v.userId).catch(() => undefined);
-  return done(true, on ? "Started. The bot checks every 5 minutes and trades on 4-hour candle closes." : "Paused. Open positions are still managed.");
+  const startMsg = a.exchange === "alpaca"
+    ? "Started. The bot checks every 5 minutes and places at most one SPY iron condor per trading day, between 15:35 and 15:56 New York time (20:35–20:56 in Lagos while the US is on daylight time, 21:35–21:56 in winter)."
+    : "Started. The bot checks every 5 minutes and trades on 4-hour candle closes.";
+  return done(true, on ? startMsg : "Paused. Open positions are still managed.");
 }
 
 export async function runNow(): Promise<Result> {
@@ -152,12 +183,14 @@ export async function closeAll(): Promise<Result> {
   const v = await requireViewer();
   const sb = createAdminClient();
   await sb.from("exbot_accounts").update({ enabled: false }).eq("user_id", v.userId);
-  const s = await Session.open(sb, v.userId);
+  const s = await openSession(sb, v.userId);
   if (!s) return done(false, "A check is running; try again in a minute.");
   try {
     const n = await s.closeAll(new TickContext(), "closed by you");
     await s.save(`paused · ${n} position(s) closed by you`);
-    return done(true, `Closed ${n} position(s) and paused the bot.`);
+    return done(true, s.a.exchange === "alpaca"
+      ? `Sent close orders for ${n} condor(s) and paused the bot; fills show up within a few minutes.`
+      : `Closed ${n} position(s) and paused the bot.`);
   } catch (e) {
     await s.release();
     return done(false, short(e));
@@ -178,7 +211,7 @@ export async function resetPaper(): Promise<Result> {
 export async function resetKillSwitch(): Promise<Result> {
   const v = await requireViewer();
   const sb = createAdminClient();
-  const s = await Session.open(sb, v.userId);
+  const s = await openSession(sb, v.userId);
   if (!s) return done(false, "A check is running; try again in a minute.");
   s.risk.resetKillSwitch(s.equity);
   await s.save();

@@ -7,10 +7,11 @@
  * position per coin, 0.35% of equity at risk per trade. Mirrors
  * exbot/config.py so the web bot trades exactly what the Python lab tested.
  */
-export type ExchangeId = "bybit" | "binance";
+export type ExchangeId = "bybit" | "binance" | "alpaca";
+export type CryptoExchangeId = Exclude<ExchangeId, "alpaca">;
 export type Mode = "paper" | "testnet" | "live";
 
-export const EXCHANGES: ExchangeId[] = ["bybit", "binance"];
+export const EXCHANGES: ExchangeId[] = ["bybit", "binance", "alpaca"];
 export const MODES: Mode[] = ["paper", "testnet", "live"];
 
 export const SYMBOLS = [
@@ -58,3 +59,43 @@ export const RISK: RiskParams = {
 export const COSTS = { takerFee: 0.00055, makerFee: 0.0002, slippage: 0.0002 } as const;
 
 export const NEWS_BLACKOUT_MIN = 30;
+
+/**
+ * Alpaca options bot (exbot/scripts/options_lab.py). Of 1,500 option setups on
+ * SPY/QQQ/IWM priced from Cboe vol indices, the only family positive both in
+ * 2005-2018 and out of sample in 2019-2026 was a SPY iron condor: ~20-delta
+ * short strikes, wings 2% of SPY, 5 trading days to expiry, held to expiry,
+ * only while SPY is above its 200-day average. One opens each trading day
+ * near the close, so up to five overlap. QQQ/IWM, 1-day expiries, buying
+ * calls/puts, narrow wings and taking profit at 50% all lost.
+ * Alpaca mode "testnet" is the Alpaca paper account.
+ */
+export const OPTIONS = {
+  underlying: "SPY",
+  dte: 5,
+  shortDelta: 0.2,
+  widths: [0.02, 0.01],          // preferred wing (fraction of SPY), then the fallback for smaller balances
+  trendSma: 200,
+  entryFromEt: 15 * 60 + 35,     // New York minutes after midnight: open near the close, as tested
+  entryToEt: 15 * 60 + 56,
+  expiryCloseEt: 15 * 60 + 40,   // on expiry day, close any condor whose short strike is within nearMoney of SPY
+  nearMoney: 0.005,
+  maxEntryAttempts: 3,
+  riskPerCondor: 0.016,          // max loss of one condor as a share of equity
+  maxTotalRisk: 0.08,            // all open condors together
+  newsWords: ["halt", "circuit breaker", "crash", "plunge", "emergency", "flash"],
+} as const;
+
+export const OPTIONS_RISK: RiskParams = {
+  riskPerTrade: OPTIONS.riskPerCondor,
+  maxOpenPositions: 6,
+  maxLeverage: 1,
+  dailyLossLimit: 0.05,
+  maxDrawdown: 0.25,
+  lossStreakHalve: 1e6,
+  lossStreakPause: 1e6,
+  pauseHours: 24,
+  symbolReviewTrades: 1e6,
+  symbolMinExpectancyR: -1,
+  symbolPauseDays: 0,
+};

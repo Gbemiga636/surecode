@@ -8,7 +8,7 @@
  * - isolated margin and a 3x leverage cap per symbol.
  */
 import ccxt, { type Exchange } from "ccxt";
-import { COSTS, RISK, TIMEFRAME, TIMEFRAME_MS, type ExchangeId, type Mode } from "./config";
+import { COSTS, RISK, TIMEFRAME, TIMEFRAME_MS, type CryptoExchangeId as ExchangeId, type Mode } from "./config";
 import { fill, type Position } from "./position";
 import type { Bar } from "./strategy";
 
@@ -25,6 +25,8 @@ export function makeExchange(id: ExchangeId, mode: Mode, creds?: Creds): Exchang
     enableRateLimit: true,
     timeout: 20_000,
     options: { defaultType: "swap", fetchMarkets: { types: ["linear"] } },
+    // bytick.com is Bybit's official alternate domain, for when bybit.com is blocked
+    ...(id === "bybit" && process.env.EXBOT_BYBIT_HOST ? { hostname: process.env.EXBOT_BYBIT_HOST } : {}),
   });
   if (mode === "testnet") ex.setSandboxMode(true);
   return ex;

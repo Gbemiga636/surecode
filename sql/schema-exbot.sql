@@ -12,7 +12,7 @@ create extension if not exists pg_net;
 create table if not exists public.exbot_accounts (
   user_id           uuid primary key references auth.users(id) on delete cascade,
   email             text not null,
-  exchange          text not null default 'bybit' check (exchange in ('bybit', 'binance')),
+  exchange          text not null default 'bybit',
   mode              text not null default 'paper' check (mode in ('paper', 'testnet', 'live')),
   enabled           boolean not null default false,
   key_enc           text,
@@ -28,6 +28,11 @@ create table if not exists public.exbot_accounts (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
+
+-- Alpaca (US options; its paper account is mode 'testnet') joined later, so the
+-- check is (re)created here for databases set up before it.
+alter table public.exbot_accounts drop constraint if exists exbot_accounts_exchange_check;
+alter table public.exbot_accounts add constraint exbot_accounts_exchange_check check (exchange in ('bybit', 'binance', 'alpaca'));
 
 -- Risk-manager memory, last processed bar per coin, practice balance: one row per user and mode.
 create table if not exists public.exbot_state (
