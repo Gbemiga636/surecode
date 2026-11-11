@@ -19,8 +19,8 @@ async function probe(url: string): Promise<Reach> {
     const r = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(8_000) });
     const body = (await r.text()).slice(0, 400);
     if (r.ok) return { ok: true, status: r.status, note: "reachable" };
-    // Alpaca answers 401/403 JSON without a key: the API is reachable from here.
-    if (url.includes("alpaca.markets") && (r.status === 401 || r.status === 403) && body.trim().startsWith("{")) {
+    // Alpaca answers 401 without a key: the API is reachable from here.
+    if (url.includes("alpaca.markets") && (r.status === 401 || r.status === 403)) {
       return { ok: true, status: r.status, note: "reachable (needs a key)" };
     }
     const geo = r.status === 451 || /block access from your country|restricted location/i.test(body);
