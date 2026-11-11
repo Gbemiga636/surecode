@@ -1,5 +1,6 @@
 {
   "framework": "nextjs",
+  "regions": ["bom1"],
   "crons": [
     { "path": "/api/crawl", "schedule": "5 23 * * *" },
     { "path": "/api/crawl", "schedule": "0 5 * * *" },
