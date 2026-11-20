@@ -16,6 +16,29 @@ type Creds = { apiKey: string; secret: string };
 type Loose = Record<string, (...args: unknown[]) => Promise<Record<string, unknown>>>;
 
 const marketCache = new Map<string, Exchange["markets"]>();
+const marketLoads = new Map<string, Promise<Exchange["markets"]>>();
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Bybit 10006 / Binance -1003 and friends: wait and try again. */
+export function isRateLimited(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e);
+  return /10006|Too many visits|RateLimitExceeded|DDoSProtection|-1003|TOO_MANY_REQUESTS|rate.?limit/i.test(m);
+}
+
+export async function withRetry<T>(fn: () => Promise<T>, tries = 4): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (!isRateLimited(e) || i === tries - 1) throw e;
+      await sleep(800 * 2 ** i + Math.floor(Math.random() * 400));
+    }
+  }
+  throw last;
+}
 
 /** testnet mode uses the exchange's test environment for prices and orders; paper and live use mainnet prices. */
 export function makeExchange(id: ExchangeId, mode: Mode, creds?: Creds): Exchange {
@@ -23,6 +46,8 @@ export function makeExchange(id: ExchangeId, mode: Mode, creds?: Creds): Exchang
   const ex = new Cls({
     ...(creds || {}),
     enableRateLimit: true,
+    // Bybit public market data is ~10 req/s; stay well under it when many coins are polled.
+    rateLimit: id === "bybit" ? 120 : 80,
     timeout: 20_000,
     options: { defaultType: "swap", fetchMarkets: { types: ["linear"] } },
     // bytick.com is Bybit's official alternate domain, for when bybit.com is blocked
@@ -35,14 +60,27 @@ export function makeExchange(id: ExchangeId, mode: Mode, creds?: Creds): Exchang
 export async function loadMarkets(ex: Exchange, id: ExchangeId, mode: Mode): Promise<void> {
   const key = `${id}:${mode === "testnet" ? "test" : "main"}`;
   const cached = marketCache.get(key);
-  if (cached) ex.markets = cached;
-  await ex.loadMarkets();
-  if (!cached) marketCache.set(key, ex.markets);
+  if (cached) {
+    ex.markets = cached;
+    return;
+  }
+  let load = marketLoads.get(key);
+  if (!load) {
+    load = (async () => {
+      const probe = makeExchange(id, mode === "testnet" ? "testnet" : "paper");
+      await withRetry(() => probe.loadMarkets());
+      marketCache.set(key, probe.markets);
+      marketLoads.delete(key);
+      return probe.markets;
+    })();
+    marketLoads.set(key, load);
+  }
+  ex.markets = await load;
 }
 
 /** Closed 4h candles, oldest first. The still-forming candle is dropped. */
 export async function closedCandles(ex: Exchange, symbol: string, limit: number, now = Date.now()): Promise<Bar[]> {
-  const rows = await ex.fetchOHLCV(symbol, TIMEFRAME, undefined, limit);
+  const rows = await withRetry(() => ex.fetchOHLCV(symbol, TIMEFRAME, undefined, limit));
   const bars = rows
     .filter((r) => r.length >= 5 && r.slice(0, 5).every((x) => typeof x === "number" && Number.isFinite(x)))
     .map((r) => ({ t: r[0] as number, o: r[1] as number, h: r[2] as number, l: r[3] as number, c: r[4] as number }));

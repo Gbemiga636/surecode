@@ -46,9 +46,12 @@ async function handle(request: Request) {
   }
 
   const url = new URL(request.url);
-  const wait = url.searchParams.get("wait") === "1";
   const force = url.searchParams.get("force") === "1";
   const onVercel = process.env.VERCEL === "1";
+  // Vercel Cron must finish the crawl in-request: `after()` was dropping some
+  // midnight runs, which left /home stuck on the previous Lagos day for days.
+  const fromCron = request.headers.get("x-vercel-cron") === "1";
+  const wait = url.searchParams.get("wait") === "1" || fromCron;
   const day = lagosDay();
 
   if (!force && ((await boardCodesToday(day)) ?? 0) > 0) {

@@ -464,7 +464,7 @@ export async function buildSafeCombo(opts: { day: string; force?: boolean; budge
       note: combo
         ? undefined
         : picks.length
-          ? "No combination of today's surest legs reached 2.0 odds without weakening it, so only single picks are shown."
+          ? "No combined code cleared the safety checks today, so only the surest single picks are shown."
           : "No leg starting after 1 pm passed every check.",
     };
     await writePayload(sb, payload);

@@ -76,6 +76,27 @@
 .exbot .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--x-muted); display: inline-block; }
 .exbot .dot.on { background: var(--x-green); box-shadow: 0 0 0 4px rgba(34, 197, 94, .15); animation: x-pulse 2s infinite; }
 @keyframes x-pulse { 50% { box-shadow: 0 0 0 7px rgba(34, 197, 94, .05); } }
+.exbot .health {
+  display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; padding: 14px 16px;
+  border-radius: 14px; border: 1px solid var(--x-line); background: rgba(255, 255, 255, .03);
+}
+.exbot .health strong { display: block; font-size: 14px; margin-bottom: 2px; }
+.exbot .health p { margin: 0; font-size: 12.5px; color: var(--x-muted); }
+.exbot .health-ic {
+  width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center;
+  font-size: 14px; font-weight: 800; flex-shrink: 0;
+}
+.exbot .health.ok { border-color: rgba(34, 197, 94, .35); background: rgba(34, 197, 94, .07); }
+.exbot .health.ok .health-ic { background: rgba(34, 197, 94, .18); color: #86efac; }
+.exbot .health.warn { border-color: rgba(245, 158, 11, .4); background: rgba(245, 158, 11, .08); }
+.exbot .health.warn .health-ic { background: rgba(245, 158, 11, .18); color: #fcd34d; }
+.exbot .health.bad { border-color: rgba(244, 63, 94, .4); background: rgba(244, 63, 94, .08); }
+.exbot .health.bad .health-ic { background: rgba(244, 63, 94, .18); color: #fda4af; }
+.exbot .health.muted .health-ic { background: rgba(148, 163, 184, .12); color: var(--x-muted); }
+.exbot h2::before {
+  content: ""; width: 7px; height: 7px; border-radius: 99px; background: var(--x-grad);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
+}
 
 /* forms */
 .exbot label { display: block; font-size: 12px; color: var(--x-muted); margin: 12px 0 5px; font-weight: 600; }

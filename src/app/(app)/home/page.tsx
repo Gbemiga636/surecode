@@ -9,12 +9,16 @@ import { OddsTicker, type TickerItem } from "@/components/OddsTicker";
 import { Icon, type IconName } from "@/components/Icons";
 import type { SureModeChoice } from "@/components/SureModePicker";
 import { after } from "next/server";
+import { runSureCrawl } from "@/lib/crawl";
 import { buildSafeCombo, safeComboPoolId } from "@/lib/safe-combo-build";
 import type { SafeComboPayload } from "@/lib/safe-combo";
 
 export const dynamic = "force-dynamic";
 /** Room for a Safe combo build started after the response (see `after` below). */
 export const maxDuration = 120;
+
+/** Avoid stacking recovery crawls when many people refresh a stale board. */
+let lastBoardRecoveryAt = 0;
 
 const PROMOS: Slide[] = [
   {
@@ -107,6 +111,31 @@ export default async function HomePage({
   }
   const stale = boardDay !== day && rows.length > 0;
 
+  // If today's board never landed (cron crawl failed), rebuild when someone opens /home.
+  if (!rows.length || stale) {
+    after(async () => {
+      try {
+        const hourLagos = Number(
+          new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Lagos", hour: "2-digit", hourCycle: "h23" }).format(new Date()),
+        );
+        if (hourLagos === 0) {
+          const minute = Number(
+            new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Lagos", minute: "2-digit" }).format(new Date()),
+          );
+          if (minute < 20) return;
+        }
+        if (Date.now() - lastBoardRecoveryAt < 12 * 60_000) return;
+        lastBoardRecoveryAt = Date.now();
+        const result = await runSureCrawl();
+        if (result.ok && result.codesWritten > 0) {
+          await buildSafeCombo({ day, budgetMs: 90_000 });
+        }
+      } catch (e) {
+        console.error("[home] board recovery failed:", e instanceof Error ? e.message : e);
+      }
+    });
+  }
+
   const { data: comboRow } = await supabase
     .from(T.pickPools)
     .select("payload")
@@ -179,8 +208,8 @@ export default async function HomePage({
           <div className="dh-stale" role="status">
             <Icon name="clock" size={18} />
             <p>
-              <strong>Today’s board is being built.</strong> Showing the latest codes from {boardDay}; some
-              matches may already have started. Each day’s codes land shortly after midnight and stay the
+              <strong>Building today’s board now.</strong> Showing the latest codes from {boardDay} for a
+              moment; refresh in about a minute. New codes are booked after midnight Lagos and stay the
               same all day.
             </p>
           </div>

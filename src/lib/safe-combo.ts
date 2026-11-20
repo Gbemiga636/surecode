@@ -24,13 +24,16 @@ export const SAFE_COMBO = {
   comboMinOdds: 2.0,
   comboMaxOdds: 2.6,
   /** Used only when nothing fits the main band. */
-  comboFallbackMaxOdds: 3.0,
+  comboFallbackMaxOdds: 3.2,
+  /** Last-resort floor so sparse days still get a combined code. */
+  comboSoftMinOdds: 1.8,
+  comboSoftMaxOdds: 3.5,
   comboSizes: [2, 3, 4] as readonly number[],
   comboFallbackSizes: [5] as readonly number[],
   picksMin: 6,
   picksMax: 8,
   /** Combo search runs over this many of the surest legs. */
-  searchTop: 20,
+  searchTop: 28,
   kickoffBufferMs: 45 * 60_000,
   /** Lagos hours (UTC+1, no DST): first kickoff on the board day, last kickoff the next morning. */
   dayStartLagosHour: 13,
@@ -104,12 +107,18 @@ export const comboChance = (legs: SafeLeg[]) => legs.reduce((a, l) => a * surest
 export const comboOdds = (legs: SafeLeg[]) => legs.reduce((a, l) => a * l.odds, 1);
 
 /**
- * Highest-chance combination inside the odds band: distinct matches and
- * leagues, sizes tried as given. Returns null when nothing fits.
+ * Highest-chance combination inside the odds band: distinct matches, and
+ * (unless `allowSameLeague`) distinct leagues. Returns null when nothing fits.
  */
 export function chooseCombo(
   legs: SafeLeg[],
-  opts: { minOdds: number; maxOdds: number; sizes: readonly number[]; searchTop?: number },
+  opts: {
+    minOdds: number;
+    maxOdds: number;
+    sizes: readonly number[];
+    searchTop?: number;
+    allowSameLeague?: boolean;
+  },
 ): SafeComboChoice | null {
   const pool = rankSurest(legs).slice(0, opts.searchTop ?? SAFE_COMBO.searchTop);
   let best: SafeComboChoice | null = null;
@@ -124,7 +133,7 @@ export function chooseCombo(
     }
     for (let i = start; i < pool.length; i++) {
       const l = pool[i];
-      if (pick.some((p) => p.eventId === l.eventId || (l.league && p.league === l.league))) continue;
+      if (pick.some((p) => p.eventId === l.eventId || (!opts.allowSameLeague && l.league && p.league === l.league))) continue;
       pick.push(l);
       walk(i + 1, size, odds * l.odds);
       pick.pop();
@@ -134,7 +143,7 @@ export function chooseCombo(
   return best;
 }
 
-/** Main band first, then the wider fallback band. */
+/** Main band first, then wider odds, then a soft last-resort band (still AI-filtered legs only). */
 export function chooseSafeCombo(legs: SafeLeg[]): SafeComboChoice | null {
   return (
     chooseCombo(legs, { minOdds: SAFE_COMBO.comboMinOdds, maxOdds: SAFE_COMBO.comboMaxOdds, sizes: SAFE_COMBO.comboSizes }) ??
@@ -142,6 +151,12 @@ export function chooseSafeCombo(legs: SafeLeg[]): SafeComboChoice | null {
       minOdds: SAFE_COMBO.comboMinOdds,
       maxOdds: SAFE_COMBO.comboFallbackMaxOdds,
       sizes: [...SAFE_COMBO.comboSizes, ...SAFE_COMBO.comboFallbackSizes],
+    }) ??
+    chooseCombo(legs, {
+      minOdds: SAFE_COMBO.comboSoftMinOdds,
+      maxOdds: SAFE_COMBO.comboSoftMaxOdds,
+      sizes: [...SAFE_COMBO.comboSizes, ...SAFE_COMBO.comboFallbackSizes],
+      allowSameLeague: true,
     })
   );
 }

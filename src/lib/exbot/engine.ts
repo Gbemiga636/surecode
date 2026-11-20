@@ -14,7 +14,7 @@ import { lockAccount, releaseAccount, type Account } from "./account";
 import { BARS, COSTS, MIN_BARS, RISK, STRATEGY, SYMBOLS, TIMEFRAME_MS, type CryptoExchangeId as ExchangeId, type Mode } from "./config";
 import { decrypt } from "./crypto";
 import { logEvent, type Level } from "./events";
-import { closedCandles, LiveBroker, loadMarkets, makeExchange, short } from "./exchange";
+import { closedCandles, isRateLimited, LiveBroker, loadMarkets, makeExchange, short } from "./exchange";
 import { NewsGuard } from "./news";
 import { OptionsSession } from "./options-engine";
 import { fill, isClosed, rMultiple, riskUsd, simulateStop, type Position } from "./position";
@@ -30,37 +30,60 @@ const px = (x: number) => Number(x.toPrecision(6)).toString();
 export class TickContext {
   private candles = new Map<string, Promise<Bar[]>>();
   private publics = new Map<string, Exchange>();
+  /** One public OHLCV at a time so Bybit/Binance never see a burst of 8×N requests. */
+  private chain: Promise<void> = Promise.resolve();
   news = new NewsGuard();
+
+  private public(id: ExchangeId, env: Mode): Exchange {
+    const key = `${id}:${env}`;
+    let ex = this.publics.get(key);
+    if (!ex) {
+      ex = makeExchange(id, env);
+      this.publics.set(key, ex);
+    }
+    return ex;
+  }
 
   candlesFor(id: ExchangeId, mode: Mode, symbol: string): Promise<Bar[]> {
     const env: Mode = mode === "testnet" ? "testnet" : "paper";
     const key = `${id}:${env}:${symbol}`;
     let p = this.candles.get(key);
     if (!p) {
-      p = (async () => {
-        let ex = this.publics.get(`${id}:${env}`);
-        if (!ex) {
-          ex = makeExchange(id, env);
-          this.publics.set(`${id}:${env}`, ex);
-        }
-        await loadMarkets(ex, id, env);
-        return closedCandles(ex, symbol, BARS);
-      })();
+      let resolve!: (v: Bar[]) => void;
+      let reject!: (e: unknown) => void;
+      p = new Promise<Bar[]>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
       this.candles.set(key, p);
+      this.chain = this.chain.then(async () => {
+        try {
+          const ex = this.public(id, env);
+          await loadMarkets(ex, id, env);
+          resolve(await closedCandles(ex, symbol, BARS));
+        } catch (e) {
+          this.candles.delete(key);
+          reject(e);
+        }
+      });
     }
     return p;
   }
 
+  /** Warm the candle cache for every coin on an exchange before members trade. */
+  async prefetch(id: ExchangeId, mode: Mode): Promise<void> {
+    for (const symbol of SYMBOLS) {
+      try {
+        await this.candlesFor(id, mode, symbol);
+      } catch {
+        /* per-symbol errors are logged when that member steps the coin */
+      }
+    }
+  }
+
   async lastPrice(id: ExchangeId, mode: Mode, symbol: string): Promise<number> {
     const bars = await this.candlesFor(id, mode, symbol);
-    const ex = this.publics.get(`${id}:${mode === "testnet" ? "testnet" : "paper"}`)!;
-    try {
-      const t = await ex.fetchTicker(symbol);
-      if (t.last && t.last > 0) return t.last;
-    } catch {
-      /* fall back to the last close */
-    }
-    return bars[bars.length - 1].c;
+    return bars[bars.length - 1]?.c || 0;
   }
 }
 
@@ -170,6 +193,10 @@ export class Session {
         await this.stepSymbol(ctx, symbol, block);
       } catch (e) {
         await this.log("error", `${symbol}: ${short(e)}`);
+        if (isRateLimited(e)) {
+          await this.log("warn", "exchange rate limit hit — pausing 3s before the next coin");
+          await new Promise<void>((r) => setTimeout(r, 3_000));
+        }
       }
     }
     const open = this.positions.size;
@@ -301,7 +328,7 @@ export async function openSession(sb: SupabaseClient, userId: string, now = new 
 
 /** One tick for every member (or one member when `onlyUser` is set). */
 export async function runTick(sb: SupabaseClient, onlyUser?: string): Promise<Record<string, string>> {
-  let q = sb.from("exbot_accounts").select("user_id,email,mode,enabled");
+  let q = sb.from("exbot_accounts").select("user_id,email,exchange,mode,enabled");
   if (onlyUser) q = q.eq("user_id", onlyUser);
   const [{ data: accounts, error }, { data: held }] = await Promise.all([
     q,
@@ -312,29 +339,37 @@ export async function runTick(sb: SupabaseClient, onlyUser?: string): Promise<Re
   const todo = (accounts || []).filter((a) => a.enabled || hasPositions.has(`${a.user_id}:${a.mode}`));
   const ctx = new TickContext();
   if (todo.some((a) => a.enabled)) await ctx.news.refresh();
+  // Warm public candles once per exchange, then process members one by one so
+  // authenticated Bybit/Binance calls never race the public market-data queue.
+  const cryptoWarm = new Set<string>();
+  for (const row of todo) {
+    if (row.exchange === "alpaca") continue;
+    const warmKey = `${row.exchange}:${row.mode === "testnet" ? "testnet" : "paper"}`;
+    if (cryptoWarm.has(warmKey)) continue;
+    cryptoWarm.add(warmKey);
+    await ctx.prefetch(row.exchange as ExchangeId, row.mode === "testnet" ? "testnet" : "paper");
+  }
   const out: Record<string, string> = {};
-  await Promise.all(
-    todo.map(async (row) => {
-      const who = String(row.email).split("@")[0];
-      let s: AnySession | null = null;
-      try {
-        s = await openSession(sb, row.user_id);
-        if (!s) {
-          out[who] = "busy (previous tick still running)";
-          return;
-        }
-        const status = await s.step(ctx);
-        await s.save(status);
-        out[who] = status;
-      } catch (e) {
-        const msg = short(e);
-        out[who] = `error: ${msg}`;
-        await logEvent(sb, row.user_id, "error", `tick failed: ${msg}`, who);
-        if (s) await s.release(`error: ${msg}`).catch(() => undefined);
-        else await sb.from("exbot_accounts").update({ status: `error: ${msg}`, status_at: new Date().toISOString() }).eq("user_id", row.user_id);
+  for (const row of todo) {
+    const who = String(row.email).split("@")[0];
+    let s: AnySession | null = null;
+    try {
+      s = await openSession(sb, row.user_id);
+      if (!s) {
+        out[who] = "busy (previous tick still running)";
+        continue;
       }
-    }),
-  );
+      const status = await s.step(ctx);
+      await s.save(status);
+      out[who] = status;
+    } catch (e) {
+      const msg = short(e);
+      out[who] = `error: ${msg}`;
+      await logEvent(sb, row.user_id, "error", `tick failed: ${msg}`, who);
+      if (s) await s.release(`error: ${msg}`).catch(() => undefined);
+      else await sb.from("exbot_accounts").update({ status: `error: ${msg}`, status_at: new Date().toISOString() }).eq("user_id", row.user_id);
+    }
+  }
   if (Math.random() < 0.02) {
     await sb.from("exbot_events").delete().lt("at", new Date(Date.now() - 60 * 86_400_000).toISOString());
   }

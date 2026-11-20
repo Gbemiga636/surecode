@@ -115,6 +115,22 @@ export default async function ExbotDashboard() {
   const plan = isOpt && equity && spot ? sizeCondor(equity, spot, 0) : null;
   const maxCondors = plan && !("skip" in plan) ? Math.max(1, Math.floor((equity! * OPTIONS.maxTotalRisk) / (plan.width * 100 * plan.qty))) : 0;
 
+  const recent = (events || []).slice(0, 12);
+  const rateLimited = recent.some((e) => /10006|Too many visits|RateLimitExceeded|rate.?limit/i.test(e.message));
+  const recentTrade = recent.some((e) => e.level === "trade");
+  const recentError = recent.some((e) => e.level === "error");
+  const health = !a.enabled
+    ? { tone: "muted", title: "Paused", detail: "Bot is off. Open positions are still managed if any remain." }
+    : rateLimited
+      ? { tone: "bad", title: "Exchange throttled", detail: "Bybit/Binance rate limit hit recently. The next ticks back off automatically — press Check now in a minute." }
+      : risk.killed || risk.haltDay === today
+        ? { tone: "warn", title: "Risk halt", detail: risk.killed ? "Kill switch is on." : "Daily loss limit reached." }
+        : recentError && !recentTrade
+          ? { tone: "warn", title: "Needs attention", detail: a.status || "A recent check logged an error — see Activity." }
+          : openCount > 0 || recentTrade
+            ? { tone: "ok", title: "Trading well", detail: openCount > 0 ? `${openCount} open · last check ${when(a.status_at)}` : `Last trade logged · ${a.status || "running"}` }
+            : { tone: "ok", title: "Watching markets", detail: isOpt ? "Waiting for the next 15:35–15:56 New York window (SPY above 200-day avg)." : "Waiting for the next 4h EMA cross. Quiet days are normal." };
+
   return (
     <main>
       <div className="top">
@@ -130,6 +146,14 @@ export default async function ExbotDashboard() {
         <div className="user">
           {v.email}
           <form action={signOut}><button className="ghost">Sign out</button></form>
+        </div>
+      </div>
+
+      <div className={`health ${health.tone}`} role="status">
+        <span className="health-ic" aria-hidden>{health.tone === "ok" ? "●" : health.tone === "bad" ? "!" : health.tone === "warn" ? "▲" : "○"}</span>
+        <div>
+          <strong>{health.title}</strong>
+          <p>{health.detail}</p>
         </div>
       </div>
 

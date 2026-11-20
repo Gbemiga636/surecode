@@ -21,7 +21,8 @@ export const SYMBOLS = [
 
 export const TIMEFRAME = "4h";
 export const TIMEFRAME_MS = 4 * 3_600_000;
-export const BARS = 1000;
+/** Enough history for EMA 200 on 4h (~33 days) with a buffer; 1000 was hammering Bybit's rate limit. */
+export const BARS = 450;
 export const MIN_BARS = 300;
 
 export const STRATEGY = { fast: 50, slow: 200, kAtr: 2.5 } as const;
