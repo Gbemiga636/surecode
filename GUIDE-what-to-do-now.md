@@ -62,7 +62,7 @@ In Supabase → SQL editor, re-run `sql/schema-exbot.sql` (adds the `strategy` c
 | IP whitelist | Prefer unrestricted, or allow Vercel egress (hard); unrestricted is easier |
 | Key type | System-generated; copy key **and** secret fully |
 
-**Nigeria tip:** If bybit.com is blocked on your ISP, use the Bybit app / mobile data / DNS 1.1.1.1 to create the key. The **bot trades from our Mumbai server**, not from your phone, once the key is saved.
+**Nigeria tip:** If bybit.com is blocked on your ISP, use the Bybit app / mobile data / DNS 1.1.1.1 to create the key. The bot runs on Vercel **iad1** (US East, Hobby single-region). Practice mode needs no exchange geo; live Bybit/Binance from the US can be flaky — use Practice/Alpaca paper to test, or upgrade to Pro later for Mumbai.
 
 ### If you still see `10006`
 
@@ -114,7 +114,7 @@ Crypto EMA can be quiet (~handful of signals per month). Alpaca options aim for 
 1. `/exbot` → **Check now** and read **Activity**.  
 2. `/home` → hard refresh; wait 2 minutes if recovering.  
 3. Server reachability: https://surecodev1.vercel.app/api/exbot/health  
-   Expect `"region":"bom1"` and Bybit/Binance/Alpaca reachable.
+   Expect `"region":"iad1"`. Alpaca should be reachable; Bybit/Binance from the US may show blocked — Practice still works.
 
 ---
 
@@ -136,6 +136,6 @@ Crypto EMA can be quiet (~handful of signals per month). Alpaca options aim for 
 | Kill rate-limit spam | Don’t spam Check; wait 2–3 min; one key only |
 | More frequent trades | Alpaca **Paper** on `/exbot` |
 | Enable Alpaca in DB | Re-run `sql/schema-exbot.sql` once |
-| Server / exchanges OK? | `/api/exbot/health` → region `bom1`, exchanges ok |
+| Server / exchanges OK? | `/api/exbot/health` → region `iad1` |
 
 That’s everything you need to operate both systems day to day.

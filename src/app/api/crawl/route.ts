@@ -8,7 +8,7 @@ import { lagosDay } from "@/lib/sure-engine";
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-/** SportyBet blocks many Mumbai IPs; crawl must run in the US. Exbot stays on bom1. */
+/** Hobby: single region iad1. SportyBet works from US East. */
 export const preferredRegion = "iad1";
 
 function isAuthorized(request: Request): boolean {

@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-export const preferredRegion = "bom1";
+export const preferredRegion = "iad1";
 
 let cached: { at: number; token: string | null } | null = null;
 
