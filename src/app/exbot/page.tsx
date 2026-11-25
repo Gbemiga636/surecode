@@ -12,7 +12,8 @@ import { Controls, KillSwitchReset, type AccountView } from "./Controls";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-export const preferredRegion = "bom1";
+/** Hobby plan: one region only. iad1 keeps SportyBet crawl working. */
+export const preferredRegion = "iad1";
 
 const SIDE: Record<number, string> = { 1: "LONG", [-1]: "SHORT" };
 const n2 = (x: number) => x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
