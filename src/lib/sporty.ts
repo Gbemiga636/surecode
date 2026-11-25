@@ -282,18 +282,28 @@ export type BookableLeg = {
 
 const headers = {
   "User-Agent": UA,
-  Accept: "application/json",
-  Referer: "https://www.sportybet.com/",
+  Accept: "application/json, text/plain, */*",
+  "Accept-Language": "en-NG,en;q=0.9",
+  Referer: "https://www.sportybet.com/ng/",
+  Origin: "https://www.sportybet.com",
   ClientId: "web",
 };
 
 async function fetchJson(url: string): Promise<unknown> {
   const controller = new AbortController();
-  const ms = Number(process.env.SPORTY_FETCH_MS) || 8_000;
+  const ms = Number(process.env.SPORTY_FETCH_MS) || 12_000;
   const timer = setTimeout(() => controller.abort(), ms);
   try {
-    const res = await fetch(url, { headers, signal: controller.signal });
-    return await res.json();
+    const res = await fetch(url, { headers, signal: controller.signal, cache: "no-store" });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`SportyBet HTTP ${res.status}: ${text.slice(0, 160)}`);
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new Error(`SportyBet returned non-JSON (${res.status}): ${text.slice(0, 120)}`);
+    }
   } finally {
     clearTimeout(timer);
   }

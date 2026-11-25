@@ -34,6 +34,11 @@ create table if not exists public.exbot_accounts (
 alter table public.exbot_accounts drop constraint if exists exbot_accounts_exchange_check;
 alter table public.exbot_accounts add constraint exbot_accounts_exchange_check check (exchange in ('bybit', 'binance', 'alpaca'));
 
+alter table public.exbot_accounts add column if not exists strategy text not null default 'ema_trend';
+alter table public.exbot_accounts drop constraint if exists exbot_accounts_strategy_check;
+alter table public.exbot_accounts add constraint exbot_accounts_strategy_check
+  check (strategy in ('ema_trend', 'breakout_55', 'spy_condor', 'stock_trail'));
+
 -- Risk-manager memory, last processed bar per coin, practice balance: one row per user and mode.
 create table if not exists public.exbot_state (
   user_id    uuid not null references auth.users(id) on delete cascade,

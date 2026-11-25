@@ -14,18 +14,47 @@ export type Mode = "paper" | "testnet" | "live";
 export const EXCHANGES: ExchangeId[] = ["bybit", "binance", "alpaca"];
 export const MODES: Mode[] = ["paper", "testnet", "live"];
 
+/** Core liquid set — fewer coins = fewer API calls and fewer rate limits. */
 export const SYMBOLS = [
-  "BTC/USDT:USDT", "ETH/USDT:USDT", "BNB/USDT:USDT", "SOL/USDT:USDT",
-  "XRP/USDT:USDT", "ADA/USDT:USDT", "DOGE/USDT:USDT", "LINK/USDT:USDT",
+  "BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT",
+  "XRP/USDT:USDT", "DOGE/USDT:USDT",
 ] as const;
 
 export const TIMEFRAME = "4h";
 export const TIMEFRAME_MS = 4 * 3_600_000;
-/** Enough history for EMA 200 on 4h (~33 days) with a buffer; 1000 was hammering Bybit's rate limit. */
-export const BARS = 450;
+/** EMA 200 needs ~300 closed 4h bars; keep a small buffer only. */
+export const BARS = 340;
 export const MIN_BARS = 300;
+/** How many coins without an open position to scan for new entries each tick. */
+export const ENTRY_SCAN_PER_TICK = 2;
 
 export const STRATEGY = { fast: 50, slow: 200, kAtr: 2.5 } as const;
+
+/** User-selectable strategies (crypto + Alpaca). */
+export type StrategyId = "ema_trend" | "breakout_55" | "spy_condor" | "stock_trail";
+
+export const STRATEGIES: {
+  id: StrategyId;
+  title: string;
+  market: "crypto" | "options" | "stocks";
+  blurb: string;
+  exchange: ExchangeId | "crypto";
+}[] = [
+  { id: "ema_trend", title: "EMA Trend", market: "crypto", exchange: "crypto", blurb: "4h EMA 50/200 cross — tested crypto default." },
+  { id: "breakout_55", title: "55-Bar Breakout", market: "crypto", exchange: "crypto", blurb: "Buy/sell when price breaks the 55-bar high/low above the 200 EMA." },
+  { id: "spy_condor", title: "SPY Iron Condor", market: "options", exchange: "alpaca", blurb: "Weekly SPY condor on Alpaca (paper or live)." },
+  { id: "stock_trail", title: "Stock Trail", market: "stocks", exchange: "alpaca", blurb: "Alpaca stocks with a trailing stop (video-style)." },
+];
+
+export const BREAKOUT = { lookback: 55, trendEma: 200, kAtr: 2.0 } as const;
+export const STOCK_TRAIL = {
+  symbols: ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "SPY"] as const,
+  stopPct: 0.05,
+  trailActivatePct: 0.10,
+  trailPct: 0.05,
+  riskPerTrade: 0.01,
+  maxOpen: 5,
+} as const;
 
 export type RiskParams = {
   riskPerTrade: number;

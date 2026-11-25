@@ -5,6 +5,7 @@ import { isCronAuthorized as isAuthorized } from "@/lib/cron-auth";
 
 export const maxDuration = 90;
 export const dynamic = "force-dynamic";
+export const preferredRegion = "iad1";
 export const runtime = "nodejs";
 
 const BUDGET_MS = 75_000;

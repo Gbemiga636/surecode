@@ -160,4 +160,12 @@ export class Alpaca {
   positions() {
     return this.req<{ symbol: string; qty: string; side: string }[]>(`${this.trade}/v2/positions`);
   }
+
+  /** Simple equity market order (stocks). */
+  stockOrder(symbol: string, side: "buy" | "sell", qty: number) {
+    return this.req<Order>(`${this.trade}/v2/orders`, {
+      method: "POST",
+      body: { symbol, qty: String(Math.floor(qty)), side, type: "market", time_in_force: "day" },
+    });
+  }
 }

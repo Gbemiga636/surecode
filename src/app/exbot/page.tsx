@@ -54,7 +54,7 @@ export default async function ExbotDashboard() {
   await sb.from("exbot_accounts").upsert({ user_id: v.userId, email: v.email }, { onConflict: "user_id", ignoreDuplicates: true });
   const { data: a, error } = await sb
     .from("exbot_accounts")
-    .select("exchange,mode,enabled,key_hint,key_check,key_enc,secret_enc,paper_start,status,status_at")
+    .select("exchange,mode,strategy,enabled,key_hint,key_check,key_enc,secret_enc,paper_start,status,status_at")
     .eq("user_id", v.userId)
     .maybeSingle();
   if (error || !a) {
@@ -107,7 +107,8 @@ export default async function ExbotDashboard() {
   const modeLabel = isOpt ? (mode === "live" ? "REAL MONEY" : "Alpaca paper") : ({ paper: "practice", testnet: "testnet", live: "REAL MONEY" } as Record<string, string>)[mode];
   const badgeClass = isOpt && mode === "testnet" ? "paper" : mode;
   const account: AccountView = {
-    exchange: a.exchange, mode: a.mode, enabled: a.enabled, keyHint: a.key_hint, keyCheck: a.key_check,
+    exchange: a.exchange, mode: a.mode, strategy: (a as { strategy?: string }).strategy || "ema_trend",
+    enabled: a.enabled, keyHint: a.key_hint, keyCheck: a.key_check,
     paperStart: Number(a.paper_start), openPositions: openCount,
   };
 
@@ -194,52 +195,32 @@ export default async function ExbotDashboard() {
           <h2>Your bot</h2>
           <Controls account={account} />
         </div>
-        {isOpt ? (
-          <div className="panel">
-            <h2>Plan for your balance</h2>
-            {plan == null ? (
-              <p className="small muted">Connect and verify your Alpaca key to see how the bot will size trades for your balance.</p>
+        <div className="panel">
+          <h2>Rules</h2>
+          {isOpt ? (
+            plan == null ? (
+              <p className="small muted">Connect Alpaca to see size for your balance.</p>
             ) : "skip" in plan ? (
-              <div className="warn">{plan.skip}. Paper trading starts at $100,000, so you can still watch the strategy work there.</div>
+              <div className="warn">{plan.skip}</div>
             ) : (
               <ul className="facts">
-                <li><span>SPY now</span><b>${n2(spot!)}</b></li>
-                <li><span>Wing width</span><b>${plan.width} ({plan.width === Math.round(OPTIONS.widths[0] * spot!) ? "tested 2% wings" : "1% fallback for this balance"})</b></li>
-                <li><span>Contracts per condor</span><b>{plan.qty}</b></li>
-                <li><span>Max loss per condor</span><b>≈ ${n0(plan.width * 100 * plan.qty)} ({((plan.width * 100 * plan.qty) / equity! * 100).toFixed(1)}% of balance)</b></li>
-                <li><span>Condors open at once</span><b>up to {Math.min(maxCondors, OPTIONS.dte)}</b></li>
-                <li><span>Total risk cap</span><b>{OPTIONS.maxTotalRisk * 100}% of balance</b></li>
+                <li><span>SPY</span><b>${n2(spot!)}</b></li>
+                <li><span>Wing</span><b>${plan.width}</b></li>
+                <li><span>Contracts</span><b>{plan.qty}</b></li>
+                <li><span>Max loss / condor</span><b>${n0(plan.width * 100 * plan.qty)}</b></li>
+                <li><span>Open at once</span><b>up to {Math.min(maxCondors, OPTIONS.dte)}</b></li>
               </ul>
-            )}
-            <hr />
-            <h2>How it trades</h2>
-            <ol className="steps">
-              <li>Each trading day between 15:35 and 15:56 New York time, it checks SPY. If SPY is below its 200-day average it sits out (that rule avoided the worst of 2008, 2020 and 2022).</li>
-              <li>Otherwise it sells an iron condor expiring 5 trading days later: ~{Math.round(OPTIONS.shortDelta * 100)}-delta put and call, with protective wings so the most it can lose is fixed when the trade opens.</li>
-              <li>It holds to expiry; on expiry day it closes any condor whose short strike is within 0.5% of SPY, so you are never assigned shares.</li>
-              <li>It skips new trades around major US news (Fed, CPI, jobs) and on alarming market headlines (halts, crashes).</li>
-            </ol>
-            <p className="small muted">
-              Tested on SPY prices and Cboe volatility from 2005 to 2026 (tuned on 2005–2018, checked on 2019–2026): about 78% of condors won and about 7 months in 10 were positive, but losing weeks and months happen
-              (2018 and 2022 were down). Option prices in the test were modelled, so the first weeks on Alpaca paper are the real check. No result is guaranteed, and no strategy wins every day.
-            </p>
-          </div>
-        ) : (
-          <div className="panel">
-            <h2>How it trades</h2>
-            <p className="small">
-              It trades the EMA {STRATEGY.fast}/{STRATEGY.slow} trend on 4-hour candles across {SYMBOLS.length} coins ({SYMBOLS.map((s) => s.split("/")[0]).join(", ")}).
-              It goes long when the {STRATEGY.fast} EMA crosses above the {STRATEGY.slow} EMA and short on the opposite cross. Every position gets a stop on the exchange at {STRATEGY.kAtr}× ATR, and it exits when the EMAs cross back.
-            </p>
-            <p className="small">
-              Each trade risks {(RISK.riskPerTrade * 100).toFixed(2)}% of the current balance, so position size grows as the account grows. It holds at most one position per coin. A {(RISK.dailyLossLimit * 100).toFixed(0)}% daily loss stops new trades for the day, and a {(RISK.maxDrawdown * 100).toFixed(0)}% drawdown triggers the kill switch. It skips new trades around major US news and around hack or delisting headlines.
-            </p>
-            <p className="small muted">
-              Of six strategies tested on data they had never seen, this one did best: it made money in 5 of 6 years since 2021 and lost in choppy 2022. It wins about 1 trade in 4: many small losses, a few big trend wins. No result is guaranteed.
-            </p>
-            <div className="note small">Want more frequent trades? Choose <b>Alpaca</b> above: the options bot opens a position on most trading days.</div>
-          </div>
-        )}
+            )
+          ) : (
+            <ul className="facts">
+              <li><span>Coins</span><b>{SYMBOLS.map((s) => s.split("/")[0]).join(" · ")}</b></li>
+              <li><span>Risk / trade</span><b>{(RISK.riskPerTrade * 100).toFixed(2)}%</b></li>
+              <li><span>Stop</span><b>{STRATEGY.kAtr}× ATR</b></li>
+              <li><span>Day halt</span><b>{(RISK.dailyLossLimit * 100).toFixed(0)}% loss</b></li>
+            </ul>
+          )}
+          <p className="small muted" style={{ marginTop: 12 }}>Pick a strategy, save, then Start bot. No strategy wins every day.</p>
+        </div>
       </div>
 
       <div className="panel">
@@ -278,7 +259,7 @@ export default async function ExbotDashboard() {
       <div className="panel">
         <h2>Trades · {modeLabel}</h2>
         {(trades || []).length === 0 ? (
-          <div className="empty">{isOpt ? "No trades yet. The first condor goes in during the next 15:35–15:56 New York window when SPY is above its 200-day average." : "No trades yet. Signals are rare (about 9 a month across all coins), so the first one can take days."}</div>
+          <div className="empty">{isOpt ? "No trades yet — next window 15:35–15:56 NY when SPY is above its 200-day avg." : "No trades yet — crypto entries only on 4h signal closes."}</div>
         ) : (
           <div className="scroll"><table>
             <thead><tr><th>Opened</th><th>{isOpt ? "Position" : "Coin"}</th><th>{isOpt ? "Credit" : "Side"}</th><th>{isOpt ? "Width" : "Entry"}</th><th>Closed</th><th>Why</th><th>P&amp;L</th><th>R</th></tr></thead>

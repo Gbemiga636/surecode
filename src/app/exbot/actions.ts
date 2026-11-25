@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Alpaca, AlpacaError } from "@/lib/exbot/alpaca";
-import { EXCHANGES, MODES, RISK, type ExchangeId, type Mode } from "@/lib/exbot/config";
+import { EXCHANGES, MODES, RISK, STRATEGIES, type ExchangeId, type Mode, type StrategyId } from "@/lib/exbot/config";
 import { decrypt, encrypt, hint } from "@/lib/exbot/crypto";
 import { openSession, runTick, TickContext } from "@/lib/exbot/engine";
 import { logEvent } from "@/lib/exbot/events";
@@ -96,16 +96,21 @@ async function verifyKey(exchange: ExchangeId, mode: Mode, apiKey: string, secre
 export async function saveSettings(_: Result, form: FormData): Promise<Result> {
   const v = await requireViewer();
   const sb = createAdminClient();
-  const exchange = String(form.get("exchange")) as ExchangeId;
-  const mode = String(form.get("mode")) as Mode;
+  const strategy = (String(form.get("strategy") || "ema_trend") as StrategyId);
+  if (!STRATEGIES.some((s) => s.id === strategy)) return done(false, "Choose a strategy.");
+  const meta = STRATEGIES.find((s) => s.id === strategy)!;
+  let exchange = String(form.get("exchange") || "bybit") as ExchangeId;
+  if (meta.exchange === "alpaca") exchange = "alpaca";
+  else if (exchange === "alpaca") exchange = "bybit";
+  let mode = String(form.get("mode")) as Mode;
+  if (exchange === "alpaca" && mode === "paper") mode = "testnet";
   const apiKey = String(form.get("apiKey") || "").trim();
   const secret = String(form.get("secret") || "").trim();
   if (!EXCHANGES.includes(exchange) || !MODES.includes(mode)) return done(false, "Choose an exchange and a mode.");
-  if (exchange === "alpaca" && mode === "paper") return done(false, "For Alpaca, choose Paper trading (your free Alpaca paper account) or Real money.");
 
   const { data: cur } = await sb.from("exbot_accounts").select("exchange,mode,key_enc,secret_enc").eq("user_id", v.userId).maybeSingle();
   if (cur && (cur.exchange !== exchange || cur.mode !== mode) && (await openPositions(v.userId, cur.mode)) > 0) {
-    return done(false, "Close your open positions before changing the exchange or mode.");
+    return done(false, "Close open positions before changing exchange, mode, or strategy.");
   }
   if (mode === "live" && form.get("confirmLive") !== "yes") {
     return done(false, "Tick the box to confirm you want to trade with real money.");
@@ -114,10 +119,12 @@ export async function saveSettings(_: Result, form: FormData): Promise<Result> {
   const keyChanged = Boolean(apiKey && secret);
   const sameEnv = cur && cur.exchange === exchange && cur.mode !== "paper" && (cur.mode === "testnet") === (mode === "testnet");
   const patch: Record<string, unknown> = {
-    user_id: v.userId, email: v.email, exchange, mode, updated_at: new Date().toISOString(),
+    user_id: v.userId, email: v.email, exchange, mode, strategy, updated_at: new Date().toISOString(),
     live_confirmed_at: mode === "live" ? new Date().toISOString() : null,
   };
-  let message = "Saved. Paper mode trades live prices with simulated money. Press Start bot.";
+  let message = exchange === "alpaca"
+    ? "Saved. Press Start bot."
+    : "Saved. Practice needs no key. Press Start bot.";
 
   if (mode !== "paper") {
     let key = apiKey, sec = secret;

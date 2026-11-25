@@ -18,7 +18,47 @@ type Loose = Record<string, (...args: unknown[]) => Promise<Record<string, unkno
 const marketCache = new Map<string, Exchange["markets"]>();
 const marketLoads = new Map<string, Promise<Exchange["markets"]>>();
 
+/** Shared public clients so many accounts do not each hammer Bybit/Binance. */
+const publicClients = new Map<string, Exchange>();
+const barCache = new Map<string, { at: number; bars: Bar[] }>();
+const publicQueues = new Map<string, Promise<unknown>>();
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function publicKey(id: ExchangeId, mode: Mode): string {
+  return `${id}:${mode === "testnet" ? "test" : "main"}`;
+}
+
+function getPublicClient(id: ExchangeId, mode: Mode): Exchange {
+  const key = publicKey(id, mode);
+  let ex = publicClients.get(key);
+  if (!ex) {
+    ex = makeExchange(id, mode === "testnet" ? "testnet" : "paper");
+    publicClients.set(key, ex);
+  }
+  return ex;
+}
+
+/** Serialize public GETs per exchange — Bybit 10006 comes from parallel ticks. */
+async function enqueuePublic<T>(id: ExchangeId, mode: Mode, fn: () => Promise<T>): Promise<T> {
+  const key = publicKey(id, mode);
+  const prev = publicQueues.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  publicQueues.set(
+    key,
+    prev.then(() => gate).catch(() => gate),
+  );
+  await prev.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    release();
+    await sleep(id === "bybit" ? 350 : 200);
+  }
+}
 
 /** Bybit 10006 / Binance -1003 and friends: wait and try again. */
 export function isRateLimited(e: unknown): boolean {
@@ -47,7 +87,7 @@ export function makeExchange(id: ExchangeId, mode: Mode, creds?: Creds): Exchang
     ...(creds || {}),
     enableRateLimit: true,
     // Bybit public market data is ~10 req/s; stay well under it when many coins are polled.
-    rateLimit: id === "bybit" ? 120 : 80,
+    rateLimit: id === "bybit" ? 280 : 120,
     timeout: 20_000,
     options: { defaultType: "swap", fetchMarkets: { types: ["linear"] } },
     // bytick.com is Bybit's official alternate domain, for when bybit.com is blocked
@@ -85,6 +125,29 @@ export async function closedCandles(ex: Exchange, symbol: string, limit: number,
     .filter((r) => r.length >= 5 && r.slice(0, 5).every((x) => typeof x === "number" && Number.isFinite(x)))
     .map((r) => ({ t: r[0] as number, o: r[1] as number, h: r[2] as number, l: r[3] as number, c: r[4] as number }));
   while (bars.length && bars[bars.length - 1].t + TIMEFRAME_MS > now) bars.pop();
+  return bars;
+}
+
+/**
+ * Shared OHLCV fetch — one request per symbol across all accounts for ~90s.
+ * Stops Bybit rate-limit 10006 when many bots tick together.
+ */
+export async function fetchClosedCandles(
+  id: ExchangeId,
+  mode: Mode,
+  symbol: string,
+  limit: number,
+  now = Date.now(),
+): Promise<Bar[]> {
+  const key = `${publicKey(id, mode)}:${symbol}:${limit}`;
+  const hit = barCache.get(key);
+  if (hit && now - hit.at < 90_000) return hit.bars;
+  const bars = await enqueuePublic(id, mode, async () => {
+    const ex = getPublicClient(id, mode);
+    await loadMarkets(ex, id, mode);
+    return closedCandles(ex, symbol, limit, now);
+  });
+  barCache.set(key, { at: now, bars });
   return bars;
 }
 

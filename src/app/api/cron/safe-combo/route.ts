@@ -6,6 +6,7 @@ import { lagosDay } from "@/lib/sure-engine";
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const preferredRegion = "iad1";
 
 /** Builds the day's Safe combo after a crawl. `?force=1` rebuilds even when the Safe codes haven't changed. */
 async function handle(request: Request) {

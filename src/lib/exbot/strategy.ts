@@ -49,3 +49,36 @@ export function emaTrend(bars: Bar[], fast: number, slow: number, kAtr: number, 
   }
   return { side, stop, exitLong: above.map((x) => !x), exitShort: above };
 }
+
+/**
+ * 55-bar breakout (video-style): long when close breaks the prior 55-bar high
+ * and sits above the trend EMA; short on the opposite. Exit on the opposite break.
+ */
+export function breakout55(bars: Bar[], lookback: number, trendEma: number, kAtr: number, allowShort = true): TrendSignals {
+  const n = bars.length;
+  const h = bars.map((b) => b.h), l = bars.map((b) => b.l), c = bars.map((b) => b.c);
+  const trend = ema(c, trendEma);
+  const a = atr(h, l, c, 14);
+  const side = new Int8Array(n);
+  const stop = new Float64Array(n).fill(NaN);
+  const exitLong: boolean[] = Array(n).fill(false);
+  const exitShort: boolean[] = Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
+    if (i < Math.max(lookback, trendEma) + 1) continue;
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - lookback; j < i; j++) {
+      if (h[j] > hi) hi = h[j];
+      if (l[j] < lo) lo = l[j];
+    }
+    if (c[i] > hi && c[i] > trend[i]) {
+      side[i] = 1;
+      stop[i] = c[i] - kAtr * a[i];
+    } else if (allowShort && c[i] < lo && c[i] < trend[i]) {
+      side[i] = -1;
+      stop[i] = c[i] + kAtr * a[i];
+    }
+    exitLong[i] = c[i] < lo;
+    exitShort[i] = c[i] > hi;
+  }
+  return { side, stop, exitLong, exitShort };
+}

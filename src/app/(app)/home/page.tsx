@@ -16,6 +16,8 @@ import type { SafeComboPayload } from "@/lib/safe-combo";
 export const dynamic = "force-dynamic";
 /** Room for a Safe combo build started after the response (see `after` below). */
 export const maxDuration = 120;
+/** Same region as /api/crawl so board recovery can reach SportyBet. */
+export const preferredRegion = "iad1";
 
 /** Avoid stacking recovery crawls when many people refresh a stale board. */
 let lastBoardRecoveryAt = 0;

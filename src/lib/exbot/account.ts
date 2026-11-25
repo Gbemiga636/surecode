@@ -1,11 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ExchangeId, Mode } from "./config";
+import type { ExchangeId, Mode, StrategyId } from "./config";
 
 export type Account = {
   user_id: string;
   email: string;
   exchange: ExchangeId;
   mode: Mode;
+  strategy: StrategyId;
   enabled: boolean;
   key_enc: string | null;
   secret_enc: string | null;
@@ -14,19 +15,27 @@ export type Account = {
   paper_start: number;
 };
 
-const ACCOUNT_COLS = "user_id,email,exchange,mode,enabled,key_enc,secret_enc,key_check,live_confirmed_at,paper_start";
+const ACCOUNT_COLS = "user_id,email,exchange,mode,strategy,enabled,key_enc,secret_enc,key_check,live_confirmed_at,paper_start";
+const ACCOUNT_COLS_LEGACY = "user_id,email,exchange,mode,enabled,key_enc,secret_enc,key_check,live_confirmed_at,paper_start";
 
 /** Locks the member for 55 s (null if another tick holds the lock) and returns the account row. */
 export async function lockAccount(sb: SupabaseClient, userId: string, now: Date): Promise<Account | null> {
   const until = new Date(now.getTime() + 55_000).toISOString();
-  const { data, error } = await sb
-    .from("exbot_accounts")
-    .update({ lock_until: until })
-    .eq("user_id", userId)
-    .or(`lock_until.is.null,lock_until.lt."${now.toISOString()}"`)
-    .select(ACCOUNT_COLS);
+  const filter = () =>
+    sb
+      .from("exbot_accounts")
+      .update({ lock_until: until })
+      .eq("user_id", userId)
+      .or(`lock_until.is.null,lock_until.lt."${now.toISOString()}"`);
+  let { data, error } = await filter().select(ACCOUNT_COLS);
+  if (error && /strategy/i.test(error.message)) {
+    ({ data, error } = await filter().select(ACCOUNT_COLS_LEGACY));
+  }
   if (error) throw new Error(`lock: ${error.message}`);
-  return data?.length ? (data[0] as unknown as Account) : null;
+  if (!data?.length) return null;
+  const row = data[0] as unknown as Account;
+  if (!row.strategy) row.strategy = "ema_trend";
+  return row;
 }
 
 export async function releaseAccount(sb: SupabaseClient, userId: string, status?: string): Promise<void> {

@@ -9,74 +9,41 @@
  * Each member is locked while processed, so overlapping ticks can't double-trade.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Exchange } from "ccxt";
 import { lockAccount, releaseAccount, type Account } from "./account";
-import { BARS, COSTS, MIN_BARS, RISK, STRATEGY, SYMBOLS, TIMEFRAME_MS, type CryptoExchangeId as ExchangeId, type Mode } from "./config";
+import {
+  BARS, BREAKOUT, COSTS, ENTRY_SCAN_PER_TICK, MIN_BARS, RISK, STRATEGY, SYMBOLS, TIMEFRAME_MS,
+  type CryptoExchangeId as ExchangeId, type Mode, type StrategyId,
+} from "./config";
 import { decrypt } from "./crypto";
 import { logEvent, type Level } from "./events";
-import { closedCandles, isRateLimited, LiveBroker, loadMarkets, makeExchange, short } from "./exchange";
+import { fetchClosedCandles, isRateLimited, LiveBroker, loadMarkets, makeExchange, short } from "./exchange";
 import { NewsGuard } from "./news";
 import { OptionsSession } from "./options-engine";
 import { fill, isClosed, rMultiple, riskUsd, simulateStop, type Position } from "./position";
 import { RiskManager, type RiskState } from "./risk";
-import { emaTrend, type Bar } from "./strategy";
+import { StockSession } from "./stock-engine";
+import { breakout55, emaTrend, type Bar } from "./strategy";
 
 const SIDE = { 1: "LONG", [-1]: "SHORT" } as const;
 const STALE_MS = 30 * 60_000;
 const fmt = (x: number, d = 2) => x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const px = (x: number) => Number(x.toPrecision(6)).toString();
 
-/** Shared within one tick: public candles per exchange/environment/coin, and the news feeds. */
+/** Shared within one tick: process-wide candle cache + news feeds. */
 export class TickContext {
-  private candles = new Map<string, Promise<Bar[]>>();
-  private publics = new Map<string, Exchange>();
-  /** One public OHLCV at a time so Bybit/Binance never see a burst of 8×N requests. */
-  private chain: Promise<void> = Promise.resolve();
   news = new NewsGuard();
 
-  private public(id: ExchangeId, env: Mode): Exchange {
-    const key = `${id}:${env}`;
-    let ex = this.publics.get(key);
-    if (!ex) {
-      ex = makeExchange(id, env);
-      this.publics.set(key, ex);
-    }
-    return ex;
-  }
-
   candlesFor(id: ExchangeId, mode: Mode, symbol: string): Promise<Bar[]> {
-    const env: Mode = mode === "testnet" ? "testnet" : "paper";
-    const key = `${id}:${env}:${symbol}`;
-    let p = this.candles.get(key);
-    if (!p) {
-      let resolve!: (v: Bar[]) => void;
-      let reject!: (e: unknown) => void;
-      p = new Promise<Bar[]>((res, rej) => {
-        resolve = res;
-        reject = rej;
-      });
-      this.candles.set(key, p);
-      this.chain = this.chain.then(async () => {
-        try {
-          const ex = this.public(id, env);
-          await loadMarkets(ex, id, env);
-          resolve(await closedCandles(ex, symbol, BARS));
-        } catch (e) {
-          this.candles.delete(key);
-          reject(e);
-        }
-      });
-    }
-    return p;
+    return fetchClosedCandles(id, mode === "testnet" ? "testnet" : "paper", symbol, BARS);
   }
 
-  /** Warm the candle cache for every coin on an exchange before members trade. */
-  async prefetch(id: ExchangeId, mode: Mode): Promise<void> {
-    for (const symbol of SYMBOLS) {
+  /** Only warm coins that already have positions — never all symbols every tick. */
+  async prefetchOpen(id: ExchangeId, mode: Mode, symbols: string[]): Promise<void> {
+    for (const symbol of symbols) {
       try {
         await this.candlesFor(id, mode, symbol);
       } catch {
-        /* per-symbol errors are logged when that member steps the coin */
+        /* logged when stepped */
       }
     }
   }
@@ -188,14 +155,21 @@ export class Session {
       }
     }
     const block = this.entryBlock();
-    for (const symbol of SYMBOLS) {
+    // Always manage open positions; only scan a rotating slice for new entries.
+    const openSyms = [...this.positions.keys()];
+    const hourBucket = Math.floor(this.now.getTime() / 3_600_000);
+    const idle = SYMBOLS.filter((s) => !this.positions.has(s));
+    const start = idle.length ? hourBucket % idle.length : 0;
+    const scan = idle.length ? [...idle.slice(start), ...idle.slice(0, start)].slice(0, ENTRY_SCAN_PER_TICK) : [];
+    const todo = [...new Set([...openSyms, ...scan])];
+    for (const symbol of todo) {
       try {
         await this.stepSymbol(ctx, symbol, block);
       } catch (e) {
         await this.log("error", `${symbol}: ${short(e)}`);
         if (isRateLimited(e)) {
-          await this.log("warn", "exchange rate limit hit — pausing 3s before the next coin");
-          await new Promise<void>((r) => setTimeout(r, 3_000));
+          await this.log("warn", "exchange rate limit — backing off 5s");
+          await new Promise<void>((r) => setTimeout(r, 5_000));
         }
       }
     }
@@ -215,7 +189,10 @@ export class Session {
     const prevT = this.lastBar[symbol];
     if (prevT === bars[last].t) return;
     this.lastBar[symbol] = bars[last].t;
-    const sig = emaTrend(bars, STRATEGY.fast, STRATEGY.slow, STRATEGY.kAtr);
+    const strat = (this.a.strategy || "ema_trend") as StrategyId;
+    const sig = strat === "breakout_55"
+      ? breakout55(bars, BREAKOUT.lookback, BREAKOUT.trendEma, BREAKOUT.kAtr)
+      : emaTrend(bars, STRATEGY.fast, STRATEGY.slow, STRATEGY.kAtr);
 
     if (p) {
       const exitAt = (i: number) => (p!.side === 1 ? sig.exitLong[i] : sig.exitShort[i]);
@@ -272,7 +249,9 @@ export class Session {
       pos.realized -= fee;
       pos.fees += fee;
     }
-    const reason = `EMA ${STRATEGY.fast}/${STRATEGY.slow} ${side === 1 ? "up" : "down"}-trend cross on the 4h close; stop ${px(stop)} (${STRATEGY.kAtr} ATR)`;
+    const reason = strat === "breakout_55"
+      ? `55-bar ${side === 1 ? "high" : "low"} breakout on 4h close (trend EMA ${BREAKOUT.trendEma}); stop ${px(stop)}`
+      : `EMA ${STRATEGY.fast}/${STRATEGY.slow} ${side === 1 ? "up" : "down"}-trend cross on the 4h close; stop ${px(stop)} (${STRATEGY.kAtr} ATR)`;
     const { data: t, error } = await this.sb.from("exbot_trades").insert({
       user_id: a.user_id, mode: a.mode, exchange: a.exchange, symbol, side, qty: pos.qty, entry: pos.entry, stop0: stop,
       entry_time: pos.entryTime, reason_in: reason,
@@ -317,13 +296,16 @@ export class Session {
   }
 }
 
-export type AnySession = Session | OptionsSession;
+export type AnySession = Session | OptionsSession | StockSession;
 
-/** Locks the member and loads the crypto or the Alpaca options session (null if busy). */
+/** Locks the member and loads the matching session (null if busy). */
 export async function openSession(sb: SupabaseClient, userId: string, now = new Date()): Promise<AnySession | null> {
   const a = await lockAccount(sb, userId, now);
   if (!a) return null;
-  return a.exchange === "alpaca" ? OptionsSession.fromLocked(sb, a, now) : Session.fromLocked(sb, a, now);
+  const strat = a.strategy || "ema_trend";
+  if (strat === "stock_trail") return StockSession.fromLocked(sb, a, now);
+  if (a.exchange === "alpaca" || strat === "spy_condor") return OptionsSession.fromLocked(sb, a, now);
+  return Session.fromLocked(sb, a, now);
 }
 
 /** One tick for every member (or one member when `onlyUser` is set). */
@@ -339,21 +321,14 @@ export async function runTick(sb: SupabaseClient, onlyUser?: string): Promise<Re
   const todo = (accounts || []).filter((a) => a.enabled || hasPositions.has(`${a.user_id}:${a.mode}`));
   const ctx = new TickContext();
   if (todo.some((a) => a.enabled)) await ctx.news.refresh();
-  // Warm public candles once per exchange, then process members one by one so
-  // authenticated Bybit/Binance calls never race the public market-data queue.
-  const cryptoWarm = new Set<string>();
-  for (const row of todo) {
-    if (row.exchange === "alpaca") continue;
-    const warmKey = `${row.exchange}:${row.mode === "testnet" ? "testnet" : "paper"}`;
-    if (cryptoWarm.has(warmKey)) continue;
-    cryptoWarm.add(warmKey);
-    await ctx.prefetch(row.exchange as ExchangeId, row.mode === "testnet" ? "testnet" : "paper");
-  }
   const out: Record<string, string> = {};
-  for (const row of todo) {
+  for (let i = 0; i < todo.length; i++) {
+    const row = todo[i];
     const who = String(row.email).split("@")[0];
     let s: AnySession | null = null;
     try {
+      // Space accounts so shared candle fetches stay under Bybit/Binance caps.
+      if (i > 0) await new Promise<void>((r) => setTimeout(r, 800));
       s = await openSession(sb, row.user_id);
       if (!s) {
         out[who] = "busy (previous tick still running)";

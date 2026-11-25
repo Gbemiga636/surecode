@@ -4,6 +4,7 @@ import { captureClosingPrices } from "@/lib/closing-capture";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
+export const preferredRegion = "iad1";
 export const runtime = "nodejs";
 
 /**
