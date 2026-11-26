@@ -118,20 +118,23 @@ export default async function ExbotDashboard() {
   const maxCondors = plan && !("skip" in plan) ? Math.max(1, Math.floor((equity! * OPTIONS.maxTotalRisk) / (plan.width * 100 * plan.qty))) : 0;
 
   const recent = (events || []).slice(0, 12);
-  const rateLimited = recent.some((e) => /10006|Too many visits|RateLimitExceeded|rate.?limit/i.test(e.message));
+  const geoBlocked = recent.some((e) => /451|CloudFront|restricted location|blocked from this server|block access from your country/i.test(e.message));
+  const rateLimited = recent.some((e) => /10006|Too many visits|RateLimitExceeded|rate.?limit/i.test(e.message)) && !geoBlocked;
   const recentTrade = recent.some((e) => e.level === "trade");
   const recentError = recent.some((e) => e.level === "error");
   const health = !a.enabled
     ? { tone: "muted", title: "Paused", detail: "Bot is off. Open positions are still managed if any remain." }
-    : rateLimited
-      ? { tone: "bad", title: "Exchange throttled", detail: "Bybit/Binance rate limit hit recently. The next ticks back off automatically — press Check now in a minute." }
-      : risk.killed || risk.haltDay === today
-        ? { tone: "warn", title: "Risk halt", detail: risk.killed ? "Kill switch is on." : "Daily loss limit reached." }
-        : recentError && !recentTrade
-          ? { tone: "warn", title: "Needs attention", detail: a.status || "A recent check logged an error — see Activity." }
-          : openCount > 0 || recentTrade
-            ? { tone: "ok", title: "Trading well", detail: openCount > 0 ? `${openCount} open · last check ${when(a.status_at)}` : `Last trade logged · ${a.status || "running"}` }
-            : { tone: "ok", title: "Watching markets", detail: isOpt ? "Waiting for the next 15:35–15:56 New York window (SPY above 200-day avg)." : "Waiting for the next 4h EMA cross. Quiet days are normal." };
+    : geoBlocked && mode !== "paper" && !isOpt
+      ? { tone: "bad", title: "Exchange geo-blocked", detail: "Bybit/Binance block this US server. Switch to Practice (simulated) or an Alpaca strategy." }
+      : rateLimited
+        ? { tone: "bad", title: "Exchange throttled", detail: "Rate limit hit recently — press Check now in a minute." }
+        : risk.killed || risk.haltDay === today
+          ? { tone: "warn", title: "Risk halt", detail: risk.killed ? "Kill switch is on." : "Daily loss limit reached." }
+          : recentError && !recentTrade
+            ? { tone: "warn", title: "Needs attention", detail: a.status || "A recent check logged an error — see Activity." }
+            : openCount > 0 || recentTrade
+              ? { tone: "ok", title: "Trading well", detail: openCount > 0 ? `${openCount} open · last check ${when(a.status_at)}` : `Last trade logged · ${a.status || "running"}` }
+              : { tone: "ok", title: "Watching markets", detail: isOpt ? "Waiting for the next 15:35–15:56 New York window (SPY above 200-day avg)." : mode === "paper" ? "Practice mode · US-safe market data · waiting for the next 4h signal." : "Waiting for the next 4h signal. Quiet days are normal." };
 
   return (
     <main>

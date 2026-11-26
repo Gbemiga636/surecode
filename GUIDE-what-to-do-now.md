@@ -38,7 +38,7 @@ Then open `/home` again.
 
 **What was wrong:** Each tick hit Bybit too hard (`retCode 10006 Too many visits`), so candles failed and **no trades** opened.
 
-**What we fixed:** Shared public OHLCV cache (~90s), serialized Bybit/Binance GETs, slower ccxt rateLimit, account stagger between ticks, fewer coins/bars, and a clear health strip.
+**What we fixed:** Practice mode no longer calls Bybit/Binance (those APIs are **geo-blocked from Vercel US** with 403/451). Candles come from Binance Vision (`data-api.binance.vision`), which works in the US. Shared cache + pacing still apply.
 
 ### One-time DB (required for strategies)
 
@@ -47,11 +47,10 @@ In Supabase → SQL editor, re-run `sql/schema-exbot.sql` (adds the `strategy` c
 ### Do this
 
 1. Open **https://surecodev1.vercel.app/exbot** and sign in.
-2. Pick one strategy: **EMA Trend** / **55 Breakout** (crypto) or **SPY Condor** / **Stock Trail** (Alpaca).
-3. Mode: **Practice** (no key) · **Testnet/Paper** · **Real**.
-4. If Testnet/Real: paste key + secret → **Save** → **Test** → must say verified.
-5. **Start bot** → **Check now**. Status should be `running · …`, not rate-limit.
-6. Ticks ~every **5 minutes**. Crypto entries only on **4h closes**; options near NY close. Quiet days are normal.
+2. Pick **EMA Trend** or **55 Breakout**, mode **Practice** (recommended on Hobby).
+3. **Save** → **Start bot** → **Check now**. Status should be `running · … USDT · N open` — not CloudFront/451.
+4. For real crypto keys: Bybit/Binance block this US server. Use **Alpaca** strategies (SPY Condor / Stock Trail) for live/paper brokerage from iad1, or upgrade Vercel to Pro for Mumbai later.
+5. Ticks ~every **5 minutes**. Crypto entries only on **4h closes**. Quiet days are normal.
 
 ### Bybit API key checklist
 

@@ -60,10 +60,60 @@ async function enqueuePublic<T>(id: ExchangeId, mode: Mode, fn: () => Promise<T>
   }
 }
 
-/** Bybit 10006 / Binance -1003 and friends: wait and try again. */
+/** True when Bybit/Binance refuse this server's country (Vercel iad1 / US). */
+export function isGeoBlocked(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e);
+  return /\b451\b|Unavailable For Legal Reasons|restricted location|block access from your country|CloudFront distribution is configured to block/i.test(m);
+}
+
+/** Bybit 10006 / Binance -1003 and friends: wait and try again. Not geo blocks. */
 export function isRateLimited(e: unknown): boolean {
+  if (isGeoBlocked(e)) return false;
   const m = e instanceof Error ? e.message : String(e);
   return /10006|Too many visits|RateLimitExceeded|DDoSProtection|-1003|TOO_MANY_REQUESTS|rate.?limit/i.test(m);
+}
+
+/** BTC/USDT:USDT → BTCUSDT for Binance Vision spot klines. */
+export function visionSymbol(symbol: string): string {
+  const base = symbol.split("/")[0]?.replace(/[^A-Za-z0-9]/g, "") || "";
+  return `${base}USDT`;
+}
+
+/**
+ * Public 4h candles from Binance's market-data host — works from the US.
+ * Hobby Vercel is iad1; Bybit/Binance futures APIs are geo-blocked there.
+ */
+export async function visionClosedCandles(symbol: string, limit: number, now = Date.now()): Promise<Bar[]> {
+  const pair = visionSymbol(symbol);
+  const want = Math.min(1000, Math.max(2, limit + 1));
+  const url = `https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=${TIMEFRAME}&limit=${want}`;
+  const rows = await withRetry(async () => {
+    const r = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`vision ${r.status}: ${text.slice(0, 160)}`);
+    const data = JSON.parse(text) as unknown;
+    if (!Array.isArray(data)) throw new Error("vision returned non-array");
+    return data as unknown[][];
+  });
+  const bars = rows
+    .filter((r) => Array.isArray(r) && r.length >= 5)
+    .map((r) => ({
+      t: Number(r[0]),
+      o: Number(r[1]),
+      h: Number(r[2]),
+      l: Number(r[3]),
+      c: Number(r[4]),
+    }))
+    .filter((b) => [b.t, b.o, b.h, b.l, b.c].every((x) => Number.isFinite(x)));
+  if (bars.length && bars[bars.length - 1].t + TIMEFRAME_MS > now) bars.pop();
+  return bars.length > limit ? bars.slice(-limit) : bars;
+}
+
+function shouldRetry(e: unknown): boolean {
+  if (isGeoBlocked(e)) return false;
+  if (isRateLimited(e)) return true;
+  const m = e instanceof Error ? e.message : String(e);
+  return /vision 5\d\d|ECONNRESET|ETIMEDOUT|fetch failed|AbortError|network/i.test(m);
 }
 
 export async function withRetry<T>(fn: () => Promise<T>, tries = 4): Promise<T> {
@@ -73,7 +123,7 @@ export async function withRetry<T>(fn: () => Promise<T>, tries = 4): Promise<T> 
       return await fn();
     } catch (e) {
       last = e;
-      if (!isRateLimited(e) || i === tries - 1) throw e;
+      if (!shouldRetry(e) || i === tries - 1) throw e;
       await sleep(800 * 2 ** i + Math.floor(Math.random() * 400));
     }
   }
@@ -130,7 +180,8 @@ export async function closedCandles(ex: Exchange, symbol: string, limit: number,
 
 /**
  * Shared OHLCV fetch — one request per symbol across all accounts for ~90s.
- * Stops Bybit rate-limit 10006 when many bots tick together.
+ * Always uses Binance Vision from Vercel (US-safe). Never calls Bybit/Binance
+ * futures hosts for candles (those return 403/451 from iad1).
  */
 export async function fetchClosedCandles(
   id: ExchangeId,
@@ -139,14 +190,11 @@ export async function fetchClosedCandles(
   limit: number,
   now = Date.now(),
 ): Promise<Bar[]> {
-  const key = `${publicKey(id, mode)}:${symbol}:${limit}`;
+  const key = `vision:${symbol}:${limit}`;
   const hit = barCache.get(key);
   if (hit && now - hit.at < 90_000) return hit.bars;
-  const bars = await enqueuePublic(id, mode, async () => {
-    const ex = getPublicClient(id, mode);
-    await loadMarkets(ex, id, mode);
-    return closedCandles(ex, symbol, limit, now);
-  });
+  // Serialize by exchange id only so ticks stay paced; data source is shared.
+  const bars = await enqueuePublic(id, mode, () => visionClosedCandles(symbol, limit, now));
   barCache.set(key, { at: now, bars });
   return bars;
 }

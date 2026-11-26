@@ -4,6 +4,8 @@
  * problem from a member's own internet provider blocking the exchange website.
  */
 const ENDPOINTS = {
+  /** US-safe public candles used by Practice mode. */
+  vision: "https://data-api.binance.vision/api/v3/ping",
   bybit: "https://api.bybit.com/v5/market/time",
   bybitTestnet: "https://api-testnet.bybit.com/v5/market/time",
   binance: "https://fapi.binance.com/fapi/v1/time",

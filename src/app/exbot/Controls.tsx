@@ -42,7 +42,7 @@ export function Controls({ account }: { account: AccountView }) {
             { id: "live", title: "Real", text: "Live Alpaca account" },
           ]
         : [
-            { id: "paper", title: "Practice", text: "Simulated 10k USDT" },
+            { id: "paper", title: "Practice", text: "Fake money · works from this server" },
             { id: "testnet", title: "Testnet", text: "Exchange fake funds" },
             { id: "live", title: "Real", text: "Live futures" },
           ],

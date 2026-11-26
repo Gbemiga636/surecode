@@ -16,7 +16,7 @@ import {
 } from "./config";
 import { decrypt } from "./crypto";
 import { logEvent, type Level } from "./events";
-import { fetchClosedCandles, isRateLimited, LiveBroker, loadMarkets, makeExchange, short } from "./exchange";
+import { fetchClosedCandles, isGeoBlocked, isRateLimited, LiveBroker, loadMarkets, makeExchange, short } from "./exchange";
 import { NewsGuard } from "./news";
 import { OptionsSession } from "./options-engine";
 import { fill, isClosed, rMultiple, riskUsd, simulateStop, type Position } from "./position";
@@ -166,10 +166,14 @@ export class Session {
       try {
         await this.stepSymbol(ctx, symbol, block);
       } catch (e) {
-        await this.log("error", `${symbol}: ${short(e)}`);
-        if (isRateLimited(e)) {
-          await this.log("warn", "exchange rate limit — backing off 5s");
-          await new Promise<void>((r) => setTimeout(r, 5_000));
+        if (isGeoBlocked(e)) {
+          await this.log("error", `${symbol}: exchange blocked from this server — use Practice (Vision prices) or Alpaca`);
+        } else {
+          await this.log("error", `${symbol}: ${short(e)}`);
+          if (isRateLimited(e)) {
+            await this.log("warn", "exchange rate limit — backing off 5s");
+            await new Promise<void>((r) => setTimeout(r, 5_000));
+          }
         }
       }
     }
